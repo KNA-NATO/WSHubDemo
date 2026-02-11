@@ -94,8 +94,7 @@ def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
         """
         html_parts.append(block)
     html_parts.append("</div>")
-    st.markdown("
-".join(html_parts), unsafe_allow_html=True)
+    st.markdown("\n".join(html_parts), unsafe_allow_html=True)
 
 # ==============================
 # ROI / P&L utilities
