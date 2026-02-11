@@ -75,26 +75,44 @@ if "overlay_offsets" not in st.session_state:
     st.session_state.overlay_offsets = {}
 
 
+
 def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
     """Render absolutely-positioned live values over the background image."""
     html_parts = ["<div class='ws-overlay'>"]
+
     for key, cfg in blocks.items():
         x = cfg.get("x_vw", 0)
         y = cfg.get("y_vh", 0)
         w = cfg.get("w_vw", 10)
         align = cfg.get("align", "left")
         cls = cfg.get("cls", "")
+
+        # Per-slot nudge offsets (in pixels)
         dx = st.session_state.overlay_offsets.get(f"{key}_dx", 0)
         dy = st.session_state.overlay_offsets.get(f"{key}_dy", 0)
-        guide_css = "border:1px dashed rgba(255,255,255,.15); background: rgba(0,0,0,.08);" if show_guides else ""
+
+        # Optional alignment guides (dashed border + subtle background)
+        guide_css = (
+            "border:1px dashed rgba(255,255,255,.15); "
+            "background: rgba(0,0,0,.08);"
+            if show_guides else ""
+        )
+
         block = f"""
-        <div class="ws-overlay-block {cls}" style="left: calc({x}vw + {dx}px); top: calc({y}vh + {dy}px); width: {w}vw; text-align:{align}; {guide_css}">
-            <div class="value kpi-mono">{values.get(key, '')}</div>
+        <div class="ws-overlay-block {cls}"
+             style="left: calc({x}vw + {dx}px);
+                    top: calc({y}vh + {dy}px);
+                    width: {w}vw;
+                    text-align: {align};
+                    {guide_css}">
+          <div class="value kpi-mono">{values.get(key, '')}</div>
         </div>
         """
         html_parts.append(block)
+
     html_parts.append("</div>")
     st.markdown("\n".join(html_parts), unsafe_allow_html=True)
+
 
 # ==============================
 # ROI / P&L utilities
