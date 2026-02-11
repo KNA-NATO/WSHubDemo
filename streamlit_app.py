@@ -2,6 +2,7 @@
 import io
 import math
 from datetime import date
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -13,12 +14,62 @@ from reportlab.lib.pagesizes import LETTER
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
 from docx import Document
-from docx.shared import Inches
 
-st.set_page_config(page_title="WorkSmart Hub – Executive Demo (Assist → Autonomy)", page_icon="🚜", layout="wide")
+# -------------------------------------------------------------
+# WorkSmart Hub – Executive Demo (Assist → Autonomy)
+# HUD x Industrial visual identity with per-tab backgrounds
+# -------------------------------------------------------------
+
+st.set_page_config(page_title="WorkSmart Hub – Executive Demo", page_icon="🚜", layout="wide")
 
 # ------------------------------
-# Utility helpers
+# Theming helpers (CSS & backgrounds)
+# ------------------------------
+
+def inject_css(path: str = "style.css"):
+    """Inject app-wide CSS and scanlines overlay."""
+    p = Path(path)
+    if p.exists():
+        css = p.read_text(encoding="utf-8")
+        st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+        st.markdown('<div class="ws-scanlines"></div>', unsafe_allow_html=True)
+    else:
+        st.warning(f"Missing CSS theme at {path}. The app will still run.")
+
+
+def apply_tab_background(image_path: str):
+    """Apply a per-tab background image (local path under assets)."""
+    st.markdown(
+        f"""
+        <style>
+          .stAppViewContainer {{
+            background-image: url('{image_path}');
+            background-size: cover; background-position: center; background-attachment: fixed;
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def kpi_block(title: str, value: str, subtitle: str | None = None, color: str = "cyan"):
+    led_color = "cyan" if color == "cyan" else "green"
+    subtitle_html = f'<div style="opacity:.65;margin-top:4px">{subtitle}</div>' if subtitle else ''
+    html = f"""
+    <div class="ws-kpi ws-card">
+      <div style="display:flex;align-items:center;gap:8px;opacity:.85;">
+        <span class="ws-led {led_color}"></span>
+        <div style="font-weight:600;letter-spacing:.3px">{title}</div>
+      </div>
+      <div class="kpi-mono" style="font-size:28px;margin-top:6px">{value}</div>
+      {subtitle_html}
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# ------------------------------
+# Utilities & model
 # ------------------------------
 
 def currency(x):
@@ -44,7 +95,7 @@ def init_defaults():
             "autonomy_productivity_gain_pct": 0.25,
             "autonomy_supervision_gain_pct": 0.20,
             "autonomy_safety_gain_pct": 0.10,
-            # P&L / enterprise
+            # Enterprise scale
             "base_deployed_fleet": 10000,
             "attach_rate": 0.35,
             "attach_growth_yoy": 0.20,
@@ -55,14 +106,10 @@ def init_defaults():
         return
 
     st.session_state.inputs = {
-        # Farm / fleet profile
+        # Fleet profile
         "acres": 1500,
         "crops": "Row crops",
-        "machines": {
-            "Tractors": 6,
-            "RTVs": 4,
-            "Construction": 2,
-        },
+        "machines": {"Tractors": 6, "RTVs": 4, "Construction": 2},
         "util_hours_per_machine": 900,
         "labor_rate": 28.0,
         "fuel_price": 3.75,
@@ -77,14 +124,14 @@ def init_defaults():
         "worksmart_price_per_machine_month": 35.0,
         "hardware_kit_price": 450.0,
         "hardware_gross_margin": 0.35,
-        # Improvement assumptions
+        # Base improvements
         "idle_reduction_pct": 0.35,
         "downtime_reduction_pct": 0.25,
         "maint_cost_reduction_pct": 0.12,
         "safety_reduction_pct": 0.30,
         "rework_reduction_pct": 0.30,
         "labor_productivity_gain_pct": 0.05,
-        # Phase features
+        # Phase effects
         "autosteer_overlap_reduction_pct": 0.12,
         "autosteer_yield_consistency_pct": 0.005,
         "autonomy_productivity_gain_pct": 0.25,
@@ -93,7 +140,7 @@ def init_defaults():
         # Finance
         "discount_rate": 0.12,
         "time_horizon_years": 3,
-        # Enterprise / scale
+        # Enterprise
         "base_deployed_fleet": 10000,
         "attach_rate": 0.35,
         "attach_growth_yoy": 0.20,
@@ -193,6 +240,7 @@ def compute_roi(inputs, actions):
     hardware_cost = attached_machines * inputs["hardware_kit_price"]
     net_annual_benefit = gross_annual_benefit - subscription_cost
 
+    # NPV over horizon (hardware upfront at t=0)
     r = inputs["discount_rate"]
     years = inputs["time_horizon_years"]
     cash_flows = [-hardware_cost] + [net_annual_benefit for _ in range(years)]
@@ -210,8 +258,6 @@ def compute_roi(inputs, actions):
     warranty_savings = 1200 * attached_machines * warranty_claim_reduction * 0.5
 
     parts_service_uplift = 180 * attached_machines
-
-    kubota_value_year1 = kubota_hw_gm + kubota_sw_revenue + warranty_savings + parts_service_uplift
 
     components = {
         "Fuel savings (idle)": fuel_savings,
@@ -242,13 +288,11 @@ def compute_roi(inputs, actions):
         "kubota_sw_revenue": kubota_sw_revenue,
         "warranty_savings": warranty_savings,
         "parts_service_uplift": parts_service_uplift,
-        "kubota_value_year1": kubota_value_year1,
         "components": components,
     }
 
 
 def enterprise_pnl(inputs):
-    """Very simple 3-year P&L model for Kubota scale (illustrative)."""
     price = inputs["worksmart_price_per_machine_month"]
     hw_price = inputs["hardware_kit_price"]
     hw_margin = inputs["hardware_gross_margin"]
@@ -258,7 +302,7 @@ def enterprise_pnl(inputs):
     churn = inputs["churn_rate"]
     cac = inputs["cac_per_attach"]
 
-    years = [1,2,3]
+    years = [1, 2, 3]
     data = []
     attached_prev = base_fleet * attach
 
@@ -287,31 +331,15 @@ def enterprise_pnl(inputs):
             "GM (proxy)": gm_est,
             "EBITDA (proxy)": ebitda_proxy,
         })
-
         attached_prev = attached
 
-    df = pd.DataFrame(data)
-    return df
+    return pd.DataFrame(data)
 
-
-def build_exec_bullets(results, inputs, actions):
-    payback_txt = f"{results['payback_months']:.1f} months" if math.isfinite(results['payback_months']) else "> horizon"
-    return [
-        f"Fleet attached: {results['attached_machines']} of {total_machines(inputs)}",
-        f"Gross annual benefit: {currency(results['gross_annual_benefit'])}",
-        f"Subscription cost: {currency(results['subscription_cost'])}",
-        f"Hardware (Year 0): {currency(results['hardware_cost'])}",
-        f"Net annual benefit: {currency(results['net_annual_benefit'])}",
-        f"NPV ({inputs['time_horizon_years']} yrs @ {pct(inputs['discount_rate'])}): {currency(results['npv'])}",
-        f"Payback: {payback_txt}",
-        "Selected actions: " + ", ".join([k for k,v in actions.items() if v]),
-    ]
 
 # ------------------------------
-# Sidebar & init
+# Initialize state
 # ------------------------------
 init_defaults()
-
 if "actions" not in st.session_state:
     st.session_state.actions = {
         "reduce_idling": True,
@@ -323,83 +351,31 @@ if "actions" not in st.session_state:
         "autonomy": False,
     }
 
-with st.sidebar:
-    st.header("🎛️ Demo Controls")
-    if st.button("Load Executive Demo Preset"):
-        st.session_state.inputs.update({
-            "acres": 2500,
-            "crops": "Mixed row/forage",
-            "machines": {"Tractors": 10, "RTVs": 6, "Construction": 3},
-            "util_hours_per_machine": 1000,
-            "labor_rate": 30.0,
-            "fuel_price": 3.85,
-            "baseline_idle_pct": 0.25,
-            "baseline_downtime_hours_month": 18,
-            "baseline_maint_cost_year": 65000,
-            "safety_incidents_year": 3,
-            "rework_pct": 0.07,
-            "yield_uplift_potential": 0.025,
-            "telemetry_attach_rate": 0.85,
-            "worksmart_price_per_machine_month": 35.0,
-            "hardware_kit_price": 450.0,
-            "hardware_gross_margin": 0.35,
-            "idle_reduction_pct": 0.40,
-            "downtime_reduction_pct": 0.30,
-            "maint_cost_reduction_pct": 0.15,
-            "safety_reduction_pct": 0.35,
-            "rework_reduction_pct": 0.35,
-            "labor_productivity_gain_pct": 0.06,
-            # Enterprise
-            "base_deployed_fleet": 12000,
-            "attach_rate": 0.40,
-            "attach_growth_yoy": 0.22,
-            "churn_rate": 0.06,
-            "cac_per_attach": 110.0,
-        })
-        st.success("Preset loaded. Ready to present.")
+# Inject theme CSS
+inject_css("style.css")
 
-    st.subheader("Pricing & Finance")
-    inp = st.session_state.inputs
-    inp["worksmart_price_per_machine_month"] = st.number_input("Price ($/machine/month)", 0.0, 999.0, float(inp["worksmart_price_per_machine_month"]))
-    inp["hardware_kit_price"] = st.number_input("Hardware kit price (one-time)", 0.0, 10000.0, float(inp["hardware_kit_price"]))
-    inp["hardware_gross_margin"] = st.slider("Hardware GM", 0.0, 0.9, float(inp["hardware_gross_margin"]))
-    inp["discount_rate"] = st.slider("Discount rate (NPV)", 0.0, 0.3, float(inp["discount_rate"]))
-    inp["time_horizon_years"] = st.slider("Time horizon (yrs)", 1, 5, int(inp["time_horizon_years"]))
+# ------------------------------
+# UI Tabs
+# ------------------------------
 
-st.title("WorkSmart Hub – Interactive Executive Demo (Assist → Autonomy)")
-st.caption("Live demo of Assess → Analyze → Act, customer ROI, and Kubota enterprise impact. Synthetic assumptions for illustration only.")
-
-# Tabs
-ov, assess, analyze, act, roi, kubota, roadmap, hardware, anim, dealer, console, export = st.tabs([
+oview, assess, analyze, act, roi, kubota, roadmap, hardware, anim, dealer, console, export = st.tabs([
     "Overview", "Assess", "Analyze", "Act", "ROI & Business Case", "Kubota Impact", "Roadmap", "Hardware Vision", "Autonomy Animation", "Dealer View", "Supervision Console", "Export"
 ])
 
-with ov:
-    col1, col2 = st.columns([1.4,1])
-    with col1:
-        st.subheader("Why WorkSmart Hub")
-        st.markdown("""
-        **WorkSmart Hub** unifies data, insights, and actions across Kubota equipment and partner systems.
-
-        **Value thesis:**
-        - **Assess** operations continuously (utilization, idling, condition, safety, tasks)
-        - **Analyze** with AI to surface anomalies & opportunities
-        - **Act** with guided workflows and supervised autonomy; then close the loop
-        """)
-    with col2:
-        fig, ax = plt.subplots(figsize=(4,4)); ax.axis('off')
-        circle_kw = dict(edgecolor='#1f77b4', facecolor='#eaf2fb', linewidth=2)
-        centers = {'Assess':(0.2,0.6),'Analyze':(0.8,0.6),'Act':(0.5,0.2)}
-        for lbl,(x,y) in centers.items():
-            c = plt.Circle((x,y),0.18,**circle_kw); ax.add_patch(c); ax.text(x,y,lbl,ha='center',va='center',fontsize=12,weight='bold')
-        ax.annotate('', xy=centers['Analyze'], xytext=centers['Assess'], arrowprops=dict(arrowstyle='->', lw=2))
-        ax.annotate('', xy=centers['Act'], xytext=centers['Analyze'], arrowprops=dict(arrowstyle='->', lw=2))
-        ax.annotate('', xy=centers['Assess'], xytext=centers['Act'], arrowprops=dict(arrowstyle='->', lw=2))
-        st.pyplot(fig)
+with oview:
+    apply_tab_background("assets/backgrounds/assess_bg.jpg")  # Placeholder until specific overview image
+    st.markdown('<div class="ws-card ws-accent"><h2>Overview</h2><div class="ws-line" style="margin-top:8px"></div></div>', unsafe_allow_html=True)
+    st.caption("A retro‑future Kubota HUD showcasing Assess → Analyze → Act, ROI, and enterprise scale.")
+    col1, col2, col3 = st.columns(3)
+    with col1: kpi_block("Connected fleet", "24", "demo value")
+    with col2: kpi_block("Avg idle share", pct(st.session_state.inputs["baseline_idle_pct"]))
+    with col3: kpi_block("Downtime (hrs/mo)", f"{st.session_state.inputs['baseline_downtime_hours_month']:.0f}")
 
 with assess:
-    st.subheader("Assess: Baseline the Operation")
-    c1,c2,c3 = st.columns(3)
+    apply_tab_background("assets/backgrounds/assess_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Assess – Baseline the Operation</h2></div>', unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns(3)
     inp = st.session_state.inputs
     with c1:
         inp["acres"] = st.number_input("Acres managed", 1, 200000, int(inp["acres"]))
@@ -416,7 +392,7 @@ with assess:
         inp["baseline_idle_pct"] = st.slider("Idle share", 0.0, 0.7, float(inp["baseline_idle_pct"]))
 
     st.markdown("---")
-    c4,c5,c6 = st.columns(3)
+    c4, c5, c6 = st.columns(3)
     with c4:
         inp["baseline_downtime_hours_month"] = st.number_input("Unplanned downtime (hrs/mo)", 0.0, 1000.0, float(inp["baseline_downtime_hours_month"]))
         inp["baseline_maint_cost_year"] = st.number_input("Maintenance cost ($/yr)", 0.0, 1e7, float(inp["baseline_maint_cost_year"]))
@@ -427,7 +403,8 @@ with assess:
         inp["yield_uplift_potential"] = st.slider("Potential yield uplift", 0.0, 0.2, float(inp["yield_uplift_potential"]))
 
 with analyze:
-    st.subheader("Analyze: Insights (simulated)")
+    apply_tab_background("assets/backgrounds/analyze_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Analyze – Insights</h2></div>', unsafe_allow_html=True)
     i = st.session_state.inputs
     insights = []
     if i["baseline_idle_pct"] >= 0.2: insights.append("High idling detected; operator coaching & auto‑idle rules")
@@ -435,25 +412,16 @@ with analyze:
     if i["rework_pct"] >= 0.05: insights.append("Material rework; guided workflows & checklists")
     if i["safety_incidents_year"] >= 2: insights.append("Safety incident rate high; monitoring & alerts advised")
     if i["yield_uplift_potential"] >= 0.02: insights.append("Yield optimization potential; variable‑rate & route planning")
-
     if insights:
-        for msg in insights: st.write("• ", msg)
+        for msg in insights:
+            st.markdown(f"<div class='ws-card' style='margin-bottom:8px'>• {msg}</div>", unsafe_allow_html=True)
     else:
         st.success("No critical issues detected. Optimization potential remains for fuel and productivity.")
 
-    st.markdown("---")
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Idle reduction", pct(i["idle_reduction_pct"]))
-    c1.metric("Downtime reduction", pct(i["downtime_reduction_pct"]))
-    c2.metric("Maintenance cost reduction", pct(i["maint_cost_reduction_pct"]))
-    c2.metric("Safety incident reduction", pct(i["safety_reduction_pct"]))
-    c3.metric("Rework reduction", pct(i["rework_reduction_pct"]))
-    c3.metric("Labor productivity gain", pct(i["labor_productivity_gain_pct"]))
-
 with act:
-    st.subheader("Act: Recommended Actions")
-    st.caption("Toggle the actions; ROI updates in real time.")
-    c1,c2 = st.columns(2)
+    apply_tab_background("assets/backgrounds/act_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Act – Next Best Actions</h2></div>', unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
     with c1:
         st.session_state.actions["reduce_idling"] = st.checkbox("Operator coaching + auto‑idle rules", True)
         st.session_state.actions["predictive_maint"] = st.checkbox("Predictive maintenance & parts pre‑positioning", True)
@@ -465,44 +433,41 @@ with act:
         st.session_state.actions["autonomy"] = st.checkbox("Autonomy (supervised)", False)
 
 with roi:
-    st.subheader("Customer ROI & Business Case")
+    apply_tab_background("assets/backgrounds/roi_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Customer ROI & Business Case</h2></div>', unsafe_allow_html=True)
     actions = st.session_state.actions
     results = compute_roi(st.session_state.inputs, actions)
 
-    c1,c2,c3,c4 = st.columns(4)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Machines attached", results["attached_machines"])
     c2.metric("Gross annual benefit", currency(results["gross_annual_benefit"]))
     c3.metric("Subscription cost", currency(results["subscription_cost"]))
     c4.metric("Net annual benefit", currency(results["net_annual_benefit"]))
 
-    c5,c6,c7 = st.columns(3)
-    ptxt = f"{results['payback_months']:.1f} months" if math.isfinite(results['payback_months']) else "> horizon"
-    c5.metric("Payback", ptxt)
+    c5, c6, c7 = st.columns(3)
+    payback_txt = f"{results['payback_months']:.1f} months" if math.isfinite(results['payback_months']) else "> horizon"
+    c5.metric("Payback", payback_txt)
     c6.metric("NPV", currency(results["npv"]))
-    roi_pct = (results["net_annual_benefit"]-0.00001) / max(results["subscription_cost"], 1)
+    roi_pct = (results["net_annual_benefit"] - 0.00001) / max(results["subscription_cost"], 1)
     c7.metric("ROI vs. subscription", pct(roi_pct))
 
-    st.markdown("**Benefit Breakdown**")
+    # Waterfall breakdown
+    st.markdown("<div class='ws-line' style='margin:12px 0'></div>", unsafe_allow_html=True)
     comps = results["components"]
     labels = list(comps.keys()); values = [comps[k] for k in labels]
     fig, ax = plt.subplots(figsize=(9,4))
     colors = ['#2ca02c' if v>=0 else '#d62728' for v in values]
     bars = ax.barh(labels, values, color=colors)
     ax.axvline(0, color='black', linewidth=0.8); ax.set_xlabel("$ per year")
-    for bar,v in zip(bars, values):
+    for bar, v in zip(bars, values):
         ax.text(bar.get_width()+ (2000 if v>=0 else -2000), bar.get_y()+bar.get_height()/2, currency(v), va='center', ha='left' if v>=0 else 'right', fontsize=9)
     st.pyplot(fig)
 
-    st.markdown("---")
-    st.markdown("**Executive One‑Pager**")
-    for b in build_exec_bullets(results, st.session_state.inputs, actions):
-        st.write("- ", b)
-
 with kubota:
-    st.subheader("Kubota Impact & 3‑Year P&L")
-    # Enterprise inputs
+    apply_tab_background("assets/backgrounds/kubota_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Kubota Impact – 3‑Year P&L</h2></div>', unsafe_allow_html=True)
     inp = st.session_state.inputs
-    c1,c2,c3 = st.columns(3)
+    c1, c2, c3 = st.columns(3)
     with c1:
         inp["base_deployed_fleet"] = st.number_input("Base deployed fleet", 1000, 1000000, int(inp["base_deployed_fleet"]))
         inp["attach_rate"] = st.slider("Attach rate (current)", 0.05, 1.0, float(inp["attach_rate"]))
@@ -521,32 +486,33 @@ with kubota:
     ax.set_ylabel("$"); ax.legend(); st.pyplot(fig)
 
 with roadmap:
-    st.subheader("Roadmap: Assist → Autonomy")
-    col1,col2 = st.columns(2)
+    apply_tab_background("assets/backgrounds/roadmap_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Roadmap – Assist → Autonomy</h2></div>', unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
     with col1:
         st.markdown("""
-        ### Phase 1 – Assist (Now)
-        - AutoSteer lane keeping, implement guidance
-        - Idling reduction & coaching
-        - Predictive maintenance, digital work orders
-        - Dealer remote visibility
+        **Phase 1 – Assist (Now)**  
+        • AutoSteer lane keeping, implement guidance  
+        • Idling reduction & coaching  
+        • Predictive maintenance, digital work orders  
+        • Dealer remote visibility  
         **Hardware:** Core Hub, GNSS+RTK, AutoSteer HMI, basic sensor tiles
         """)
     with col2:
         st.markdown("""
-        ### Phase 2 – Autonomy (Next)
-        - Supervised route execution & implement automation
-        - Obstacle detection & control
-        - Fleet orchestration + remote supervision
-        - Compliance logging
+        **Phase 2 – Autonomy (Next)**  
+        • Supervised route execution & implement automation  
+        • Obstacle detection & control  
+        • Fleet orchestration + remote supervision  
+        • Compliance logging  
         **Hardware:** Full perception rail, redundant compute, override paddle
         """)
     st.session_state.actions["autosteer"] = st.checkbox("Include AutoSteer in ROI", True)
     st.session_state.actions["autonomy"] = st.checkbox("Include Autonomy in ROI", False)
 
 with hardware:
-    st.subheader("Hardware Vision (Ive‑inspired)")
-    st.caption("Drop renders into ./assets with the names shown; they load automatically.")
+    apply_tab_background("assets/backgrounds/hardware_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Hardware Vision</h2></div>', unsafe_allow_html=True)
     assets = {
         "Core Module (hero)": "assets/worksmart_core_module.png",
         "Sensor Rail & Tiles": "assets/worksmart_sensor_rail.png",
@@ -563,9 +529,8 @@ with hardware:
                 st.info(f"Missing: {path}")
 
 with anim:
-    st.subheader("Autonomy Animation – Supervised Route Execution")
-    st.caption("Scrub timeline or press Play; enable obstacle to see detour.")
-
+    apply_tab_background("assets/backgrounds/anim_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Autonomy Animation – Supervised Route</h2></div>', unsafe_allow_html=True)
     import time
     field_w, field_h = 100.0, 60.0
     stripe_spacing = 6.0
@@ -646,8 +611,8 @@ with anim:
         draw_frame(frame_idx)
 
 with dealer:
-    st.subheader("Dealer View – Attach Pipeline")
-    st.caption("Synthetic pipeline for demonstration; replace with real CRM export later.")
+    apply_tab_background("assets/backgrounds/dealer_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Dealer View – Attach Pipeline</h2></div>', unsafe_allow_html=True)
     np.random.seed(0)
     dealers = [f"Dealer {i}" for i in range(1,11)]
     pipeline = pd.DataFrame({
@@ -663,8 +628,8 @@ with dealer:
     ax.set_ylabel('Units'); ax.legend(); plt.xticks(rotation=45, ha='right'); st.pyplot(fig)
 
 with console:
-    st.subheader("Supervision Console (Mock)")
-    st.caption("Simulated fleet statuses; use for storytelling.")
+    apply_tab_background("assets/backgrounds/console_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Supervision Console</h2></div>', unsafe_allow_html=True)
     rng = np.random.default_rng(42)
     statuses = ["Idle","Running","Manual Override","Error"]
     machines = [f"Unit-{i:03d}" for i in range(1,13)]
@@ -681,42 +646,44 @@ with console:
     st.info("Remote actions: Pause • Resume • Return‑to‑Base (storyboard only)")
 
 with export:
-    st.subheader("Exports – Executive One‑Pager")
+    apply_tab_background("assets/backgrounds/roi_bg.jpg")
+    st.markdown('<div class="ws-card ws-accent"><h2>Exports – Executive One‑Pager</h2></div>', unsafe_allow_html=True)
     actions = st.session_state.actions
     results = compute_roi(st.session_state.inputs, actions)
-    bullets = build_exec_bullets(results, st.session_state.inputs, actions)
+
+    bullets = [
+        f"Fleet attached: {results['attached_machines']} of {total_machines(st.session_state.inputs)}",
+        f"Gross annual benefit: {currency(results['gross_annual_benefit'])}",
+        f"Subscription cost: {currency(results['subscription_cost'])}",
+        f"Hardware (Year 0): {currency(results['hardware_cost'])}",
+        f"Net annual benefit: {currency(results['net_annual_benefit'])}",
+        f"NPV ({st.session_state.inputs['time_horizon_years']} yrs @ {pct(st.session_state.inputs['discount_rate'])}): {currency(results['npv'])}",
+        f"Payback: {payback_txt}",
+        "Selected actions: " + ", ".join([k for k,v in st.session_state.actions.items() if v]),
+    ]
 
     colP, colD = st.columns(2)
 
     with colP:
         if st.button("Generate PDF"):
-            buf = io.BytesIO()
-            c = canvas.Canvas(buf, pagesize=LETTER)
-            width, height = LETTER
-            y = height - 1*inch
-            c.setFont("Helvetica-Bold", 16)
-            c.drawString(1*inch, y, "WorkSmart Hub – Executive Summary")
-            y -= 0.3*inch
-            c.setFont("Helvetica", 10)
-            c.drawString(1*inch, y, f"Date: {date.today().isoformat()}")
-            y -= 0.3*inch
+            buf = io.BytesIO(); c = canvas.Canvas(buf, pagesize=LETTER)
+            width, height = LETTER; y = height - 1*inch
+            c.setFont("Helvetica-Bold", 16); c.drawString(1*inch, y, "WorkSmart Hub – Executive Summary"); y -= 0.3*inch
+            c.setFont("Helvetica", 10); c.drawString(1*inch, y, f"Date: {date.today().isoformat()}"); y -= 0.3*inch
             c.setFont("Helvetica", 11)
             for b in bullets:
                 c.drawString(1*inch, y, f"• {b}"); y -= 0.25*inch
-                if y < 1*inch:
-                    c.showPage(); y = height - 1*inch
+                if y < 1*inch: c.showPage(); y = height - 1*inch
             c.showPage(); c.save()
             st.download_button("Download PDF", data=buf.getvalue(), file_name="WorkSmart_Executive_OnePager.pdf", mime="application/pdf")
 
     with colD:
         if st.button("Generate Word (.docx)"):
-            doc = Document()
-            doc.add_heading('WorkSmart Hub – Executive Summary', 0)
+            doc = Document(); doc.add_heading('WorkSmart Hub – Executive Summary', 0)
             doc.add_paragraph(f"Date: {date.today().isoformat()}")
-            for b in bullets:
-                doc.add_paragraph(b, style='List Bullet')
+            for b in bullets: doc.add_paragraph(b, style='List Bullet')
             out = io.BytesIO(); doc.save(out)
             st.download_button("Download DOCX", data=out.getvalue(), file_name="WorkSmart_Executive_OnePager.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
 st.markdown("---")
-st.caption(f"© {date.today().year} Kubota – WorkSmart Hub demo. Synthetic data for illustrative purposes only.")
+st.caption(f"© {date.today().year} Kubota – WorkSmart HUD demo. Synthetic data for illustration only.")
