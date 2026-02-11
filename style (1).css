@@ -1,7 +1,0 @@
-
-/* Overlay engine for aligning live values onto background slots */
-.ws-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
-.ws-overlay-block { position: absolute; color: #e9eef5; text-shadow: 0 0 10px rgba(0,226,255,.25); }
-.ws-overlay-block .value { font-size: 22px; letter-spacing: 0.5px; }
-.ws-overlay-block.hud-top .value { font-size: 20px; font-weight: 700; }
-.ws-overlay-block.hud-bottom .value { font-size: 24px; font-weight: 700; }
