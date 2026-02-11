@@ -2,7 +2,7 @@
 import io
 import math
 import base64, mimetypes
-import streamlit.comonents.v1 as components
+import streamlit.components.v1 as components
 from datetime import date
 from pathlib import Path
 import numpy as np
