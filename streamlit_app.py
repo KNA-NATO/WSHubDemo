@@ -26,23 +26,25 @@ def inject_css(path: str = "style.css"):
     p = Path(path)
     if p.exists():
         css = p.read_text(encoding="utf-8")
-        st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+        st.markdown(f"""
+        <style>
+        {css}
+        </style>
+        """, unsafe_allow_html=True)
         st.markdown('<div class="ws-scanlines"></div>', unsafe_allow_html=True)
     else:
         st.warning(f"Missing CSS theme at {path}. The app will still run.")
 
 
 def apply_tab_background(image_path: str):
-    """Embed a background image as data-URI for reliability on Streamlit Cloud.
-    Uses a clean triple-quoted f-string to avoid unterminated-string issues.
-    """
+    """Embed a background image as data-URI for reliability on Streamlit Cloud."""
     p = Path(image_path)
     if not p.exists():
         st.warning(f"Background not found: {image_path}")
         return
     mime = mimetypes.guess_type(p.name)[0] or "image/jpeg"
     data64 = base64.b64encode(p.read_bytes()).decode("ascii")
-    css = f"""
+    st.markdown(f"""
     <style>
       .stApp, .stAppViewContainer, [data-testid="stAppViewContainer"] {{
         background-image: url("data:{mime};base64,{data64}");
@@ -51,8 +53,7 @@ def apply_tab_background(image_path: str):
         background-attachment: fixed;
       }}
     </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
 # ==============================
 # Overlay Engine (align live values to art slots)
@@ -75,7 +76,8 @@ if "overlay_offsets" not in st.session_state:
 
 
 def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
-    html_blocks = []
+    """Render absolutely-positioned live values over the background image."""
+    html_parts = ["<div class='ws-overlay'>"]
     for key, cfg in blocks.items():
         x = cfg.get("x_vw", 0)
         y = cfg.get("y_vh", 0)
@@ -85,15 +87,15 @@ def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
         dx = st.session_state.overlay_offsets.get(f"{key}_dx", 0)
         dy = st.session_state.overlay_offsets.get(f"{key}_dy", 0)
         guide_css = "border:1px dashed rgba(255,255,255,.15); background: rgba(0,0,0,.08);" if show_guides else ""
-        html_blocks.append(
-            f"<div class='ws-overlay-block {cls}' style="
-            f"left: calc({x}vw + {dx}px); top: calc({y}vh + {dy}px); width: {w}vw; text-align:{align}; {guide_css}">"
-            f"<div class='value kpi-mono'>{values.get(key, '')}</div>"
-            "</div>"
-        )
-    wrapper = "<div class='ws-overlay'>" + "
-".join(html_blocks) + "</div>"
-    st.markdown(wrapper, unsafe_allow_html=True)
+        block = f"""
+        <div class="ws-overlay-block {cls}" style="left: calc({x}vw + {dx}px); top: calc({y}vh + {dy}px); width: {w}vw; text-align:{align}; {guide_css}">
+            <div class="value kpi-mono">{values.get(key, '')}</div>
+        </div>
+        """
+        html_parts.append(block)
+    html_parts.append("</div>")
+    st.markdown("
+".join(html_parts), unsafe_allow_html=True)
 
 # ==============================
 # ROI / P&L utilities
