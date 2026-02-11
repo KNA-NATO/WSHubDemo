@@ -19,6 +19,7 @@ from docx import Document
 # -------------------------------------------------------------
 # WorkSmart Hub – Executive Demo (Assist → Autonomy)
 # HUD x Industrial visual identity with per-tab backgrounds
+# + Overlay engine to align LIVE values to designed slots in background
 # -------------------------------------------------------------
 
 st.set_page_config(page_title="WorkSmart Hub – Executive Demo", page_icon="🚜", layout="wide")
@@ -61,22 +62,64 @@ def apply_tab_background(image_path: str):
         unsafe_allow_html=True,
     )
 
+# ------------------------------
+# Overlay engine for placing live values on background
+# ------------------------------
 
-def kpi_block(title: str, value: str, subtitle: str | None = None, color: str = "cyan"):
-    led_color = "cyan" if color == "cyan" else "green"
-    subtitle_html = f'<div style="opacity:.65;margin-top:4px">{subtitle}</div>' if subtitle else ''
-    html = f"""
-    <div class="ws-kpi ws-card">
-      <div style="display:flex;align-items:center;gap:8px;opacity:.85;">
-        <span class="ws-led {led_color}"></span>
-        <div style="font-weight:600;letter-spacing:.3px">{title}</div>
-      </div>
-      <div class="kpi-mono" style="font-size:28px;margin-top:6px">{value}</div>
-      {subtitle_html}
-    </div>
+# Default overlay positions for the ASSESS background.
+# Coordinates use viewport units so they scale with the window (designed for 1920x1080 but responsive).
+ASSESS_OVERLAY = {
+    # top metric row (approximate positions under the "ASSESS" header)
+    "fleet":      {"x_vw": 22.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
+    "acres":      {"x_vw": 42.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
+    "util_rate":  {"x_vw": 61.0, "y_vh": 10.2, "w_vw": 14.0, "align": "center", "cls": "hud-top"},
+    "idle_time":  {"x_vw": 80.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
+    # bottom card row (five pods)
+    "maint_cost": {"x_vw": 14.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
+    "downtime":   {"x_vw": 32.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
+    "safety":     {"x_vw": 50.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
+    "rework":     {"x_vw": 68.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
+    "fuel":       {"x_vw": 86.0, "y_vh": 84.0, "w_vw": 10.0, "align": "center", "cls": "hud-bottom"},
+}
+
+# Allow fine adjustments (px) without modifying code
+if "overlay_offsets" not in st.session_state:
+    st.session_state.overlay_offsets = {}
+
+
+def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
+    """Render absolutely positioned overlay blocks on top of the app.
+    blocks: mapping id -> {x_vw,y_vh,w_vw,align,cls}
+    values: mapping id -> string to display
+    show_guides: draws subtle rectangles for alignment
     """
-    st.markdown(html, unsafe_allow_html=True)
+    html_blocks = []
+    for key, cfg in blocks.items():
+        x = cfg.get("x_vw", 0)
+        y = cfg.get("y_vh", 0)
+        w = cfg.get("w_vw", 10)
+        align = cfg.get("align", "left")
+        cls = cfg.get("cls", "")
+        # session-based offset tweaks (px)
+        dx = st.session_state.overlay_offsets.get(f"{key}_dx", 0)
+        dy = st.session_state.overlay_offsets.get(f"{key}_dy", 0)
 
+        guide = "border:1px dashed rgba(255,255,255,.15); background: rgba(0,0,0,.08);" if show_guides else ""
+        html_blocks.append(f"""
+        <div class="ws-overlay-block {cls}" style="left: calc({x}vw + {dx}px); top: calc({y}vh + {dy}px); width: {w}vw; text-align:{align}; {guide}">
+            <div class="value kpi-mono">{values.get(key, '')}</div>
+        </div>
+        """)
+
+    st.markdown(
+        """
+        <div class="ws-overlay">
+            %s
+        </div>
+        """ % ("
+".join(html_blocks)),
+        unsafe_allow_html=True,
+    )
 
 # ------------------------------
 # Utilities & model
@@ -385,32 +428,60 @@ with assess:
     apply_tab_background("assets/backgrounds/assess_bg.jpg")
     st.markdown('<div class="ws-card ws-accent"><h2>Assess – Baseline the Operation</h2></div>', unsafe_allow_html=True)
 
+    # Toggle: show overlay guides and tweak offsets (for live alignment)
+    with st.expander("Overlay alignment tools (Assess)"):
+        show_guides = st.checkbox("Show overlay guides", value=False)
+        cols = st.columns(5)
+        for i, key in enumerate(["fleet","acres","util_rate","idle_time","maint_cost","downtime","safety","rework","fuel"]):
+            with cols[i % 5]:
+                st.session_state.overlay_offsets[f"{key}_dx"] = st.number_input(f"{key} dx", -50, 50, int(st.session_state.overlay_offsets.get(f"{key}_dx", 0)))
+                st.session_state.overlay_offsets[f"{key}_dy"] = st.number_input(f"{key} dy", -50, 50, int(st.session_state.overlay_offsets.get(f"{key}_dy", 0)))
+
+    # Build live values for overlay slots
+    i = st.session_state.inputs
+    # Simple utilization proxy (assumes 2000 hrs/year full util)
+    util_rate = min(i["util_hours_per_machine"] / 2000.0, 1.0)
+    values = {
+        "fleet": f"{total_machines(i)}",
+        "acres": f"{i['acres']:,}",
+        "util_rate": f"{util_rate*100:.0f}%",
+        "idle_time": f"{i['baseline_idle_pct']*100:.0f}%",
+        "maint_cost": currency(i["baseline_maint_cost_year"]),
+        "downtime": f"{i['baseline_downtime_hours_month']*12:.0f}",
+        "safety": f"{i['safety_incidents_year']:.0f}",
+        "rework": f"{i['rework_pct']*100:.0f}%",
+        "fuel": f"${i['fuel_price']:.2f}",
+    }
+    # Render overlay LAST so it sits above widgets but below interactions (pointer-events:none)
+    render_overlay(ASSESS_OVERLAY, values, show_guides=show_guides)
+
+    # Keep original input controls below for interactivity
+    st.markdown("---")
     c1, c2, c3 = st.columns(3)
-    inp = st.session_state.inputs
     with c1:
-        inp["acres"] = st.number_input("Acres managed", 1, 200000, int(inp["acres"]))
-        inp["crops"] = st.text_input("Crop type(s)", str(inp["crops"]))
-        inp["util_hours_per_machine"] = st.number_input("Utilization (hrs/machine/yr)", 0, 3000, int(inp["util_hours_per_machine"]))
+        i["acres"] = st.number_input("Acres managed", 1, 200000, int(i["acres"]))
+        i["crops"] = st.text_input("Crop type(s)", str(i["crops"]))
+        i["util_hours_per_machine"] = st.number_input("Utilization (hrs/machine/yr)", 0, 3000, int(i["util_hours_per_machine"]))
     with c2:
         st.markdown("**Fleet size**")
-        for k in list(inp["machines"].keys()):
-            inp["machines"][k] = st.number_input(k, 0, 200, int(inp["machines"][k]))
-        inp["telemetry_attach_rate"] = st.slider("Attach rate", 0.0, 1.0, float(inp["telemetry_attach_rate"]))
+        for k in list(i["machines"].keys()):
+            i["machines"][k] = st.number_input(k, 0, 200, int(i["machines"][k]))
+        i["telemetry_attach_rate"] = st.slider("Attach rate", 0.0, 1.0, float(i["telemetry_attach_rate"]))
     with c3:
-        inp["labor_rate"] = st.number_input("Labor rate ($/hr)", 0.0, 500.0, float(inp["labor_rate"]))
-        inp["fuel_price"] = st.number_input("Fuel price ($/gal)", 0.0, 20.0, float(inp["fuel_price"]))
-        inp["baseline_idle_pct"] = st.slider("Idle share", 0.0, 0.7, float(inp["baseline_idle_pct"]))
+        i["labor_rate"] = st.number_input("Labor rate ($/hr)", 0.0, 500.0, float(i["labor_rate"]))
+        i["fuel_price"] = st.number_input("Fuel price ($/gal)", 0.0, 20.0, float(i["fuel_price"]))
+        i["baseline_idle_pct"] = st.slider("Idle share", 0.0, 0.7, float(i["baseline_idle_pct"]))
 
     st.markdown("---")
     c4, c5, c6 = st.columns(3)
     with c4:
-        inp["baseline_downtime_hours_month"] = st.number_input("Unplanned downtime (hrs/mo)", 0.0, 1000.0, float(inp["baseline_downtime_hours_month"]))
-        inp["baseline_maint_cost_year"] = st.number_input("Maintenance cost ($/yr)", 0.0, 1e7, float(inp["baseline_maint_cost_year"]))
+        i["baseline_downtime_hours_month"] = st.number_input("Unplanned downtime (hrs/mo)", 0.0, 1000.0, float(i["baseline_downtime_hours_month"]))
+        i["baseline_maint_cost_year"] = st.number_input("Maintenance cost ($/yr)", 0.0, 1e7, float(i["baseline_maint_cost_year"]))
     with c5:
-        inp["safety_incidents_year"] = st.number_input("Safety incidents (per yr)", 0.0, 100.0, float(inp["safety_incidents_year"]))
-        inp["rework_pct"] = st.slider("Rework (% of labor)", 0.0, 0.5, float(inp["rework_pct"]))
+        i["safety_incidents_year"] = st.number_input("Safety incidents (per yr)", 0.0, 100.0, float(i["safety_incidents_year"]))
+        i["rework_pct"] = st.slider("Rework (% of labor)", 0.0, 0.5, float(i["rework_pct"]))
     with c6:
-        inp["yield_uplift_potential"] = st.slider("Potential yield uplift", 0.0, 0.2, float(inp["yield_uplift_potential"]))
+        i["yield_uplift_potential"] = st.slider("Potential yield uplift", 0.0, 0.2, float(i["yield_uplift_potential"]))
 
 with analyze:
     apply_tab_background("assets/backgrounds/analyze_bg.jpg")
@@ -461,7 +532,6 @@ with roi:
     roi_pct = (results["net_annual_benefit"] - 0.00001) / max(results["subscription_cost"], 1)
     c7.metric("ROI vs. subscription", pct(roi_pct))
 
-    # Waterfall breakdown
     st.markdown("<div class='ws-line' style='margin:12px 0'></div>", unsafe_allow_html=True)
     comps = results["components"]
     labels = list(comps.keys()); values = [comps[k] for k in labels]

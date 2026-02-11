@@ -1,65 +1,7 @@
 
-/* -------------------------------------------------------
-   WorkSmart HUD x Industrial (Retro-Future Kubota Theme)
-   ------------------------------------------------------- */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Roboto+Mono:wght@500;700&display=swap');
-
-:root{
-  --bg: #0f1318;
-  --bg-2: #1e232a;
-  --ink: #e9eef5;
-  --muted: #9aa6b2;
-  --kubota: #F36E21;
-  --hud-cyan: #00E2FF;
-  --hud-lime: #7CFF7A;
-  --copper: #B87333;
-  --brass: #C49A6C;
-  --steel: #8A8F98;
-  --card-radius: 12px;
-  --card-glow: 0 0 24px rgba(0, 226, 255, 0.08);
-}
-
-html, body, .stApp { background: var(--bg); color: var(--ink); font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, sans-serif; }
-
-h1,h2,h3 { letter-spacing: 0.2px; }
-.kpi-mono { font-family: 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-
-.ws-card {
-  border-radius: var(--card-radius);
-  background: linear-gradient(180deg, rgba(18,22,27,.85), rgba(12,16,20,.9));
-  border: 1px solid rgba(140,150,165,.25);
-  box-shadow: var(--card-glow);
-  padding: 16px 18px;
-  position: relative; overflow: hidden;
-}
-.ws-card:before { /* etched brass corners */
-  content:""; position:absolute; inset:0; pointer-events:none; opacity:.4;
-  background:
-    radial-gradient(12px 12px at 6px 6px, rgba(200,154,108,.15), transparent 60%),
-    radial-gradient(12px 12px at calc(100% - 6px) 6px, rgba(200,154,108,.15), transparent 60%),
-    radial-gradient(12px 12px at 6px calc(100% - 6px), rgba(200,154,108,.15), transparent 60%),
-    radial-gradient(12px 12px at calc(100% - 6px) calc(100% - 6px), rgba(200,154,108,.15), transparent 60%);
-}
-
-.ws-accent { border-left: 2px solid var(--kubota); padding-left: 10px; }
-.ws-line { height: 1px; background: linear-gradient(90deg, transparent, var(--hud-cyan), transparent); opacity:.45; }
-
-@keyframes ws-glow { 0%,100% { box-shadow: 0 0 0 rgba(0,226,255,0.0);} 50% { box-shadow: 0 0 18px rgba(0,226,255,0.65);} }
-.ws-kpi { border: 1px solid rgba(255,255,255,.12); border-radius: 10px; padding: 12px 14px; background: rgba(20,25,30,.66); animation: ws-glow 3s ease-in-out infinite; }
-
-@keyframes ws-led { 0%,100% {opacity:.25;} 50% {opacity:1;} }
-.ws-led { width:10px; height:10px; border-radius: 50%; display:inline-block; margin-right:8px; }
-.ws-led.green { background: var(--hud-lime); animation: ws-led 2.5s ease-in-out infinite; }
-.ws-led.cyan  { background: var(--hud-cyan); animation: ws-led 2.5s ease-in-out infinite; }
-
-.ws-scanlines { position: fixed; inset: 0; pointer-events:none; z-index: 1; opacity: .07;
-  background: repeating-linear-gradient(to bottom, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 1px, transparent 2px, transparent 6px); }
-
-.stButton > button { background: linear-gradient(180deg, #1b2026, #14181d); border: 1px solid rgba(243,110,33,.65); color: var(--ink); border-radius: 8px; }
-.stButton > button:hover { border-color: rgba(243,110,33,1); box-shadow: 0 0 16px rgba(243,110,33,.35); }
-
-/* Tabs glow line */
-[data-testid="stHorizontalBlock"] .stTabs [data-baseweb="tab-list"] {
-  border-bottom: 1px solid rgba(243,110,33,.35);
-  box-shadow: 0 6px 18px -12px rgba(243,110,33,.25);
-}
+/* --- Overlay engine for aligning live values onto background slots --- */
+.ws-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+.ws-overlay-block { position: absolute; color: #e9eef5; text-shadow: 0 0 10px rgba(0,226,255,.25); }
+.ws-overlay-block .value { font-size: 22px; letter-spacing: 0.5px; }
+.ws-overlay-block.hud-top .value { font-size: 20px; font-weight: 700; }
+.ws-overlay-block.hud-bottom .value { font-size: 24px; font-weight: 700; }
