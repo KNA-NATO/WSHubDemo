@@ -1,6 +1,7 @@
 
 import io
 import math
+import base64, mimetypes
 from datetime import date
 from pathlib import Path
 
@@ -38,13 +39,22 @@ def inject_css(path: str = "style.css"):
 
 
 def apply_tab_background(image_path: str):
-    """Apply a per-tab background image (local path under assets)."""
+    """Apply a per-tab background image by embedding it as a CSS data-URI.
+    This avoids any path/URL issues on Streamlit Cloud and targets both legacy
+    and current container selectors.
+    """
+    p = Path(image_path)
+    if not p.exists():
+        st.warning(f"Background not found: {image_path}")
+        return
+    mime = mimetypes.guess_type(p.name)[0] or "image/jpeg"
+    data64 = base64.b64encode(p.read_bytes()).decode("ascii")
     st.markdown(
         f"""
         <style>
-          .stAppViewContainer {{
-            background-image: url('{image_path}');
-            background-size: cover; background-position: center; background-attachment: fixed;
+          .stApp, .stAppViewContainer, [data-testid="stAppViewContainer"] {{
+              background-image: url("data:{mime};base64,{data64}");
+              background-size: cover; background-position: center; background-attachment: fixed;
           }}
         </style>
         """,
