@@ -4,13 +4,11 @@ import math
 import base64, mimetypes
 from datetime import date
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 import os
-
 from reportlab.lib.pagesizes import LETTER
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
@@ -23,101 +21,84 @@ st.set_page_config(page_title="WorkSmart Hub – Executive Demo", page_icon="�
 # ==============================
 
 def inject_css(path: str = "style.css"):
+    """Read a CSS file and inject it into the app."""
     p = Path(path)
     if p.exists():
         css = p.read_text(encoding="utf-8")
-        st.markdown(f"""
-        <style>
-        {css}
-        </style>
-        """, unsafe_allow_html=True)
-        st.markdown('<div class="ws-scanlines"></div>', unsafe_allow_html=True)
+        st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
     else:
         st.warning(f"Missing CSS theme at {path}. The app will still run.")
 
 
 def apply_tab_background(image_path: str):
-    """Embed a background image as data-URI for reliability on Streamlit Cloud."""
+    """Embed a background image as data-URI for reliability on Streamlit (if file exists)."""
     p = Path(image_path)
     if not p.exists():
         st.warning(f"Background not found: {image_path}")
         return
     mime = mimetypes.guess_type(p.name)[0] or "image/jpeg"
     data64 = base64.b64encode(p.read_bytes()).decode("ascii")
-    st.markdown(f"""
-    <style>
-      .stApp, .stAppViewContainer, [data-testid="stAppViewContainer"] {{
-        background-image: url("data:{mime};base64,{data64}");
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
-      }}
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background: url(data:{mime};base64,{data64}) no-repeat center center fixed !important;
+            background-size: cover !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # ==============================
 # Overlay Engine (align live values to art slots)
 # ==============================
-
 ASSESS_OVERLAY = {
-    "fleet":      {"x_vw": 22.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
-    "acres":      {"x_vw": 42.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
-    "util_rate":  {"x_vw": 61.0, "y_vh": 10.2, "w_vw": 14.0, "align": "center", "cls": "hud-top"},
-    "idle_time":  {"x_vw": 80.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
+    "fleet": {"x_vw": 22.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
+    "acres": {"x_vw": 42.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
+    "util_rate": {"x_vw": 61.0, "y_vh": 10.2, "w_vw": 14.0, "align": "center", "cls": "hud-top"},
+    "idle_time": {"x_vw": 80.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
     "maint_cost": {"x_vw": 14.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
-    "downtime":   {"x_vw": 32.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
-    "safety":     {"x_vw": 50.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
-    "rework":     {"x_vw": 68.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
-    "fuel":       {"x_vw": 86.0, "y_vh": 84.0, "w_vw": 10.0, "align": "center", "cls": "hud-bottom"},
+    "downtime": {"x_vw": 32.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
+    "safety": {"x_vw": 50.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
+    "rework": {"x_vw": 68.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
+    "fuel": {"x_vw": 86.0, "y_vh": 84.0, "w_vw": 10.0, "align": "center", "cls": "hud-bottom"},
 }
 
 if "overlay_offsets" not in st.session_state:
     st.session_state.overlay_offsets = {}
 
-
-
 def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
     """Render absolutely-positioned live values over the background image."""
-    html_parts = ["<div class='ws-overlay'>"]
-
+    html_parts = ['<div class="ws-overlay">']
     for key, cfg in blocks.items():
         x = cfg.get("x_vw", 0)
         y = cfg.get("y_vh", 0)
         w = cfg.get("w_vw", 10)
         align = cfg.get("align", "left")
         cls = cfg.get("cls", "")
-
         # Per-slot nudge offsets (in pixels)
         dx = st.session_state.overlay_offsets.get(f"{key}_dx", 0)
         dy = st.session_state.overlay_offsets.get(f"{key}_dy", 0)
-
         # Optional alignment guides (dashed border + subtle background)
         guide_css = (
             "border:1px dashed rgba(255,255,255,.15); "
             "background: rgba(0,0,0,.08);"
-            if show_guides else ""
+            if show_guides
+            else ""
         )
-
         block = f"""
-        <div class="ws-overlay-block {cls}"
-             style="left: calc({x}vw + {dx}px);
-                    top: calc({y}vh + {dy}px);
-                    width: {w}vw;
-                    text-align: {align};
-                    {guide_css}">
-          <div class="value kpi-mono">{values.get(key, '')}</div>
+        <div class="ws-overlay-block {cls}" style="left:{x}vw; top:{y}vh; width:{w}vw; transform:translate({dx}px,{dy}px); text-align:{align}; {guide_css}">
+            <div class="value">{values.get(key, '')}</div>
         </div>
         """
         html_parts.append(block)
-
     html_parts.append("</div>")
     st.markdown("\n".join(html_parts), unsafe_allow_html=True)
-
 
 # ==============================
 # ROI / P&L utilities
 # ==============================
-
 def currency(x):
     try:
         return f"${x:,.0f}"
@@ -130,25 +111,8 @@ def pct(x):
     except Exception:
         return str(x)
 
-
 def init_defaults():
-    if "inputs" in st.session_state:
-        missing_defaults = {
-            "autosteer_overlap_reduction_pct": 0.12,
-            "autosteer_yield_consistency_pct": 0.005,
-            "autonomy_productivity_gain_pct": 0.25,
-            "autonomy_supervision_gain_pct": 0.20,
-            "autonomy_safety_gain_pct": 0.10,
-            "base_deployed_fleet": 10000,
-            "attach_rate": 0.35,
-            "attach_growth_yoy": 0.20,
-            "churn_rate": 0.06,
-            "cac_per_attach": 120.0,
-        }
-        st.session_state.inputs.update({k: st.session_state.inputs.get(k, v) for k, v in missing_defaults.items()})
-        return
-
-    st.session_state.inputs = {
+    defaults = {
         "acres": 1500,
         "crops": "Row crops",
         "machines": {"Tractors": 6, "RTVs": 4, "Construction": 2},
@@ -156,9 +120,9 @@ def init_defaults():
         "labor_rate": 28.0,
         "fuel_price": 3.75,
         "baseline_idle_pct": 0.22,
-        "baseline_downtime_hours_month": 14,
-        "baseline_maint_cost_year": 48000,
-        "safety_incidents_year": 2,
+        "baseline_downtime_hours_month": 14.0,
+        "baseline_maint_cost_year": 48000.0,
+        "safety_incidents_year": 2.0,
         "rework_pct": 0.06,
         "yield_uplift_potential": 0.02,
         "telemetry_attach_rate": 0.75,
@@ -184,6 +148,13 @@ def init_defaults():
         "churn_rate": 0.06,
         "cac_per_attach": 120.0,
     }
+    if "inputs" not in st.session_state:
+        st.session_state.inputs = defaults.copy()
+    else:
+        # Ensure any new defaults are present without overwriting current user values
+        for k, v in defaults.items():
+            if k not in st.session_state.inputs:
+                st.session_state.inputs[k] = v
 
 def total_machines(inputs):
     return int(sum(inputs["machines"].values()))
@@ -191,7 +162,7 @@ def total_machines(inputs):
 def estimate_fuel_use(inputs):
     gph = {"Tractors": 3.8, "RTVs": 1.4, "Construction": 4.5}
     hours = inputs["util_hours_per_machine"]
-    total_gal = 0
+    total_gal = 0.0
     for k, v in inputs["machines"].items():
         total_gal += gph.get(k, 3.0) * hours * v
     return total_gal
@@ -202,6 +173,7 @@ def compute_roi(inputs, actions):
     attached_machines = int(round(n * attach))
 
     total_hours = n * inputs["util_hours_per_machine"]
+
     baseline_fuel_gal = estimate_fuel_use(inputs)
     fuel_price = inputs["fuel_price"]
     labor_rate = inputs["labor_rate"]
@@ -255,13 +227,23 @@ def compute_roi(inputs, actions):
         autonomy_safety = inputs["safety_incidents_year"] * avg_cost_per_incident * inputs["autonomy_safety_gain_pct"]
 
     gross_annual_benefit = (
-        fuel_savings + downtime_value + maint_savings + safety_saved +
-        rework_saved + productivity_value + yield_uplift_value +
-        autosteer_fuel + autosteer_yield + autonomy_prod + autonomy_supervision + autonomy_safety
+        fuel_savings
+        + downtime_value
+        + maint_savings
+        + safety_saved
+        + rework_saved
+        + productivity_value
+        + yield_uplift_value
+        + autosteer_fuel
+        + autosteer_yield
+        + autonomy_prod
+        + autonomy_supervision
+        + autonomy_safety
     )
 
     subscription_cost = attached_machines * inputs["worksmart_price_per_machine_month"] * 12
     hardware_cost = attached_machines * inputs["hardware_kit_price"]
+
     net_annual_benefit = gross_annual_benefit - subscription_cost
 
     r = inputs["discount_rate"]
@@ -270,7 +252,7 @@ def compute_roi(inputs, actions):
     npv = sum(cf / ((1 + r) ** t) for t, cf in enumerate(cash_flows))
 
     monthly_net = net_annual_benefit / 12 if net_annual_benefit != 0 else 0.00001
-    payback_months = hardware_cost / monthly_net if monthly_net > 0 else float('inf')
+    payback_months = hardware_cost / monthly_net if monthly_net > 0 else float("inf")
 
     hardware_margin = inputs["hardware_gross_margin"]
     kubota_hw_gm = hardware_cost * hardware_margin
@@ -314,7 +296,6 @@ def compute_roi(inputs, actions):
         "components": components,
     }
 
-
 def enterprise_pnl(inputs):
     price = inputs["worksmart_price_per_machine_month"]
     hw_price = inputs["hardware_kit_price"]
@@ -327,8 +308,8 @@ def enterprise_pnl(inputs):
 
     years = [1, 2, 3]
     data = []
-    attached_prev = base_fleet * attach
 
+    attached_prev = base_fleet * attach
     for y in years:
         gross_adds = attached_prev * growth
         churned = attached_prev * churn
@@ -339,21 +320,25 @@ def enterprise_pnl(inputs):
         hw_rev = net_adds * hw_price
         hw_gm = hw_rev * hw_margin
         cac_cost = net_adds * cac
+
         total_rev = arr + hw_rev
-        gm_est = hw_gm + arr * 0.8
+        gm_est = hw_gm + arr * 0.8  # assume 80% SW GM proxy
         ebitda_proxy = gm_est - cac_cost
 
-        data.append({
-            "Year": f"Y{y}",
-            "Attached (eop)": int(attached),
-            "ARR": arr,
-            "Hardware Rev": hw_rev,
-            "Hardware GM": hw_gm,
-            "CAC": cac_cost,
-            "Total Rev": total_rev,
-            "GM (proxy)": gm_est,
-            "EBITDA (proxy)": ebitda_proxy,
-        })
+        data.append(
+            {
+                "Year": f"Y{y}",
+                "Attached (eop)": int(attached),
+                "ARR": arr,
+                "Hardware Rev": hw_rev,
+                "Hardware GM": hw_gm,
+                "CAC": cac_cost,
+                "Total Rev": total_rev,
+                "GM (proxy)": gm_est,
+                "EBITDA (proxy)": ebitda_proxy,
+            }
+        )
+
         attached_prev = attached
 
     return pd.DataFrame(data)
@@ -361,8 +346,8 @@ def enterprise_pnl(inputs):
 # ==============================
 # Init & Tabs
 # ==============================
-
 init_defaults()
+
 if "actions" not in st.session_state:
     st.session_state.actions = {
         "reduce_idling": True,
@@ -376,32 +361,67 @@ if "actions" not in st.session_state:
 
 inject_css("style.css")
 
-oview, assess, analyze, act, roi, kubota, roadmap, hardware, anim, dealer, console, export = st.tabs([
-    "Overview", "Assess", "Analyze", "Act", "ROI & Business Case", "Kubota Impact", "Roadmap", "Hardware Vision", "Autonomy Animation", "Dealer View", "Supervision Console", "Export"
-])
+oview, assess, analyze, act, roi, kubota, roadmap, hardware, anim, dealer, console, export = st.tabs(
+    [
+        "Overview",
+        "Assess",
+        "Analyze",
+        "Act",
+        "ROI & Business Case",
+        "Kubota Impact",
+        "Roadmap",
+        "Hardware Vision",
+        "Autonomy Animation",
+        "Dealer View",
+        "Supervision Console",
+        "Export",
+    ]
+)
 
 with oview:
     apply_tab_background("assets/backgrounds/assess_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Overview</h2><div class="ws-line" style="margin-top:8px"></div></div>', unsafe_allow_html=True)
-    st.caption("A retro‑future Kubota HUD showcasing Assess → Analyze → Act, ROI, and enterprise scale.")
+    st.markdown("""
+    ### Overview
+    """)
+    st.caption("A retro–future Kubota HUD showcasing Assess → Analyze → Act, ROI, and enterprise scale.")
+
     col1, col2, col3 = st.columns(3)
-    with col1: st.metric("Connected fleet (demo)", 24)
-    with col2: st.metric("Avg idle share", pct(st.session_state.inputs["baseline_idle_pct"]))
-    with col3: st.metric("Downtime (hrs/mo)", f"{st.session_state.inputs['baseline_downtime_hours_month']:.0f}")
+    with col1:
+        st.metric("Connected fleet (demo)", 24)
+    with col2:
+        st.metric("Avg idle share", pct(st.session_state.inputs["baseline_idle_pct"]))
+    with col3:
+        st.metric("Downtime (hrs/mo)", f"{st.session_state.inputs['baseline_downtime_hours_month']:.0f}")
 
 with assess:
     apply_tab_background("assets/backgrounds/assess_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Assess – Baseline the Operation</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Assess – Baseline the Operation
+    """)
 
     # Alignment tools
     with st.expander("Overlay alignment tools (Assess)"):
         show_guides = st.checkbox("Show overlay guides", value=False)
         cols = st.columns(5)
-        keys = ["fleet","acres","util_rate","idle_time","maint_cost","downtime","safety","rework","fuel"]
+        keys = [
+            "fleet",
+            "acres",
+            "util_rate",
+            "idle_time",
+            "maint_cost",
+            "downtime",
+            "safety",
+            "rework",
+            "fuel",
+        ]
         for i, key in enumerate(keys):
             with cols[i % 5]:
-                st.session_state.overlay_offsets[f"{key}_dx"] = st.number_input(f"{key} dx", -50, 50, int(st.session_state.overlay_offsets.get(f"{key}_dx", 0)))
-                st.session_state.overlay_offsets[f"{key}_dy"] = st.number_input(f"{key} dy", -50, 50, int(st.session_state.overlay_offsets.get(f"{key}_dy", 0)))
+                st.session_state.overlay_offsets[f"{key}_dx"] = st.number_input(
+                    f"{key} dx", -50, 50, int(st.session_state.overlay_offsets.get(f"{key}_dx", 0))
+                )
+                st.session_state.overlay_offsets[f"{key}_dy"] = st.number_input(
+                    f"{key} dy", -50, 50, int(st.session_state.overlay_offsets.get(f"{key}_dy", 0))
+                )
 
     i = st.session_state.inputs
     util_rate = min(i["util_hours_per_machine"] / 2000.0, 1.0)
@@ -424,7 +444,9 @@ with assess:
     with c1:
         i["acres"] = st.number_input("Acres managed", 1, 200000, int(i["acres"]))
         i["crops"] = st.text_input("Crop type(s)", str(i["crops"]))
-        i["util_hours_per_machine"] = st.number_input("Utilization (hrs/machine/yr)", 0, 3000, int(i["util_hours_per_machine"]))
+        i["util_hours_per_machine"] = st.number_input(
+            "Utilization (hrs/machine/yr)", 0, 3000, int(i["util_hours_per_machine"])
+        )
     with c2:
         st.markdown("**Fleet size**")
         for k in list(i["machines"].keys()):
@@ -438,47 +460,62 @@ with assess:
     st.markdown("---")
     c4, c5, c6 = st.columns(3)
     with c4:
-        i["baseline_downtime_hours_month"] = st.number_input("Unplanned downtime (hrs/mo)", 0.0, 1000.0, float(i["baseline_downtime_hours_month"]))
-        i["baseline_maint_cost_year"] = st.number_input("Maintenance cost ($/yr)", 0.0, 1e7, float(i["baseline_maint_cost_year"]))
+        i["baseline_downtime_hours_month"] = st.number_input(
+            "Unplanned downtime (hrs/mo)", 0.0, 1000.0, float(i["baseline_downtime_hours_month"]))
+        i["baseline_maint_cost_year"] = st.number_input(
+            "Maintenance cost ($/yr)", 0.0, 1e7, float(i["baseline_maint_cost_year"]))
     with c5:
-        i["safety_incidents_year"] = st.number_input("Safety incidents (per yr)", 0.0, 100.0, float(i["safety_incidents_year"]))
+        i["safety_incidents_year"] = st.number_input(
+            "Safety incidents (per yr)", 0.0, 100.0, float(i["safety_incidents_year"]))
         i["rework_pct"] = st.slider("Rework (% of labor)", 0.0, 0.5, float(i["rework_pct"]))
     with c6:
         i["yield_uplift_potential"] = st.slider("Potential yield uplift", 0.0, 0.2, float(i["yield_uplift_potential"]))
 
 with analyze:
     apply_tab_background("assets/backgrounds/analyze_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Analyze – Insights</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Analyze – Insights
+    """)
     i = st.session_state.inputs
     insights = []
-    if i["baseline_idle_pct"] >= 0.2: insights.append("High idling detected; operator coaching & auto‑idle rules")
-    if i["baseline_downtime_hours_month"] >= 12: insights.append("Elevated unplanned downtime; predictive maintenance recommended")
-    if i["rework_pct"] >= 0.05: insights.append("Material rework; guided workflows & checklists")
-    if i["safety_incidents_year"] >= 2: insights.append("Safety incident rate high; monitoring & alerts advised")
-    if i["yield_uplift_potential"] >= 0.02: insights.append("Yield optimization potential; variable‑rate & route planning")
+    if i["baseline_idle_pct"] >= 0.2:
+        insights.append("High idling detected; operator coaching & auto–idle rules")
+    if i["baseline_downtime_hours_month"] >= 12:
+        insights.append("Elevated unplanned downtime; predictive maintenance recommended")
+    if i["rework_pct"] >= 0.05:
+        insights.append("Material rework; guided workflows & checklists")
+    if i["safety_incidents_year"] >= 2:
+        insights.append("Safety incident rate high; monitoring & alerts advised")
+    if i["yield_uplift_potential"] >= 0.02:
+        insights.append("Yield optimization potential; variable–rate & route planning")
+
     if insights:
         for msg in insights:
-            st.markdown(f"<div class='ws-card' style='margin-bottom:8px'>• {msg}</div>", unsafe_allow_html=True)
+            st.markdown(f"- {msg}")
     else:
         st.success("No critical issues detected. Optimization potential remains for fuel and productivity.")
 
 with act:
     apply_tab_background("assets/backgrounds/act_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Act – Next Best Actions</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Act – Next Best Actions
+    """)
     c1, c2 = st.columns(2)
     with c1:
-        st.session_state.actions["reduce_idling"] = st.checkbox("Operator coaching + auto‑idle rules", True)
-        st.session_state.actions["predictive_maint"] = st.checkbox("Predictive maintenance & parts pre‑positioning", True)
+        st.session_state.actions["reduce_idling"] = st.checkbox("Operator coaching + auto–idle rules", True)
+        st.session_state.actions["predictive_maint"] = st.checkbox("Predictive maintenance & parts pre–positioning", True)
         st.session_state.actions["safety_monitoring"] = st.checkbox("Safety monitoring & alerts", True)
         st.session_state.actions["autosteer"] = st.checkbox("AutoSteer (assist)", True)
     with c2:
         st.session_state.actions["guided_ops"] = st.checkbox("Guided workflows & digital checklists", True)
-        st.session_state.actions["optimize_ops"] = st.checkbox("Optimization (path, variable‑rate, sequencing)", False)
+        st.session_state.actions["optimize_ops"] = st.checkbox("Optimization (path, variable–rate, sequencing)", False)
         st.session_state.actions["autonomy"] = st.checkbox("Autonomy (supervised)", False)
 
 with roi:
     apply_tab_background("assets/backgrounds/roi_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Customer ROI & Business Case</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Customer ROI & Business Case
+    """)
     actions = st.session_state.actions
     results = compute_roi(st.session_state.inputs, actions)
 
@@ -495,24 +532,36 @@ with roi:
     roi_pct = (results["net_annual_benefit"] - 0.00001) / max(results["subscription_cost"], 1)
     c7.metric("ROI vs. subscription", pct(roi_pct))
 
-    st.markdown("<div class='ws-line' style='margin:12px 0'></div>", unsafe_allow_html=True)
+    st.markdown(" ")
     comps = results["components"]
-    labels = list(comps.keys()); values = [comps[k] for k in labels]
-    fig, ax = plt.subplots(figsize=(9,4))
-    colors = ['#2ca02c' if v>=0 else '#d62728' for v in values]
+    labels = list(comps.keys())
+    values = [comps[k] for k in labels]
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    colors = ["#2ca02c" if v >= 0 else "#d62728" for v in values]
     bars = ax.barh(labels, values, color=colors)
-    ax.axvline(0, color='black', linewidth=0.8); ax.set_xlabel("$ per year")
+    ax.axvline(0, color="black", linewidth=0.8)
+    ax.set_xlabel("$ per year")
     for bar, v in zip(bars, values):
-        ax.text(bar.get_width()+ (2000 if v>=0 else -2000), bar.get_y()+bar.get_height()/2, currency(v), va='center', ha='left' if v>=0 else 'right', fontsize=9)
+        ax.text(
+            bar.get_width() + (2000 if v >= 0 else -2000),
+            bar.get_y() + bar.get_height() / 2,
+            currency(v),
+            va="center",
+            ha="left" if v >= 0 else "right",
+            fontsize=9,
+        )
     st.pyplot(fig)
 
 with kubota:
     apply_tab_background("assets/backgrounds/kubota_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Kubota Impact – 3‑Year P&L</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Kubota Impact – 3–Year P&L
+    """)
     inp = st.session_state.inputs
     c1, c2, c3 = st.columns(3)
     with c1:
-        inp["base_deployed_fleet"] = st.number_input("Base deployed fleet", 1000, 1000000, int(inp["base_deployed_fleet"]))
+        inp["base_deployed_fleet"] = st.number_input("Base deployed fleet", 1000, 1_000_000, int(inp["base_deployed_fleet"]))
         inp["attach_rate"] = st.slider("Attach rate (current)", 0.05, 1.0, float(inp["attach_rate"]))
     with c2:
         inp["attach_growth_yoy"] = st.slider("Attach growth YoY", 0.0, 1.0, float(inp["attach_growth_yoy"]))
@@ -521,41 +570,66 @@ with kubota:
         inp["cac_per_attach"] = st.number_input("CAC per new attach ($)", 0.0, 5000.0, float(inp["cac_per_attach"]))
 
     df = enterprise_pnl(inp)
-    st.dataframe(df.style.format({"ARR":"${:,.0f}","Hardware Rev":"${:,.0f}","Hardware GM":"${:,.0f}","CAC":"${:,.0f}","Total Rev":"${:,.0f}","GM (proxy)":"${:,.0f}","EBITDA (proxy)":"${:,.0f}"}))
+    st.dataframe(
+        df.style.format(
+            {
+                "ARR": "${:,.0f}",
+                "Hardware Rev": "${:,.0f}",
+                "Hardware GM": "${:,.0f}",
+                "CAC": "${:,.0f}",
+                "Total Rev": "${:,.0f}",
+                "GM (proxy)": "${:,.0f}",
+                "EBITDA (proxy)": "${:,.0f}",
+            }
+        )
+    )
 
-    fig, ax = plt.subplots(figsize=(8,3))
-    ax.plot(df["Year"], df["ARR"], marker='o', label='ARR')
-    ax.plot(df["Year"], df["Hardware Rev"], marker='o', label='Hardware Rev')
-    ax.set_ylabel("$"); ax.legend(); st.pyplot(fig)
+    fig, ax = plt.subplots(figsize=(8, 3))
+    ax.plot(df["Year"], df["ARR"], marker="o", label="ARR")
+    ax.plot(df["Year"], df["Hardware Rev"], marker="o", label="Hardware Rev")
+    ax.set_ylabel("$")
+    ax.legend()
+    st.pyplot(fig)
 
 with roadmap:
     apply_tab_background("assets/backgrounds/roadmap_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Roadmap – Assist → Autonomy</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Roadmap – Assist → Autonomy
+    """)
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("""
-        **Phase 1 – Assist (Now)**  
-        • AutoSteer lane keeping, implement guidance  
-        • Idling reduction & coaching  
-        • Predictive maintenance, digital work orders  
-        • Dealer remote visibility  
-        **Hardware:** Core Hub, GNSS+RTK, AutoSteer HMI, basic sensor tiles
-        """)
+        st.markdown(
+            """
+            **Phase 1 – Assist (Now)**
+            - AutoSteer lane keeping, implement guidance
+            - Idling reduction & coaching
+            - Predictive maintenance, digital work orders
+            - Dealer remote visibility
+
+            **Hardware:** Core Hub, GNSS+RTK, AutoSteer HMI, basic sensor tiles
+            """
+        )
     with col2:
-        st.markdown("""
-        **Phase 2 – Autonomy (Next)**  
-        • Supervised route execution & implement automation  
-        • Obstacle detection & control  
-        • Fleet orchestration + remote supervision  
-        • Compliance logging  
-        **Hardware:** Full perception rail, redundant compute, override paddle
-        """)
+        st.markdown(
+            """
+            **Phase 2 – Autonomy (Next)**
+            - Supervised route execution & implement automation
+            - Obstacle detection & control
+            - Fleet orchestration + remote supervision
+            - Compliance logging
+
+            **Hardware:** Full perception rail, redundant compute, override paddle
+            """
+        )
+
     st.session_state.actions["autosteer"] = st.checkbox("Include AutoSteer in ROI", True)
     st.session_state.actions["autonomy"] = st.checkbox("Include Autonomy in ROI", False)
 
 with hardware:
     apply_tab_background("assets/backgrounds/hardware_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Hardware Vision</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Hardware Vision
+    """)
     assets = {
         "Core Module (hero)": "assets/worksmart_core_module.png",
         "Sensor Rail & Tiles": "assets/worksmart_sensor_rail.png",
@@ -564,8 +638,8 @@ with hardware:
         "Mounted on Kubota": "assets/worksmart_on_kubota.png",
     }
     colA, colB = st.columns(2)
-    for idx,(label, path) in enumerate(assets.items()):
-        with (colA if idx<3 else colB):
+    for idx, (label, path) in enumerate(assets.items()):
+        with (colA if idx < 3 else colB):
             if os.path.exists(path):
                 st.image(path, caption=label, use_column_width=True)
             else:
@@ -573,11 +647,14 @@ with hardware:
 
 with anim:
     apply_tab_background("assets/backgrounds/anim_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Autonomy Animation – Supervised Route</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Autonomy Animation – Supervised Route
+    """)
+
     field_w, field_h = 100.0, 60.0
     stripe_spacing = 6.0
     speed_mps = st.slider("Vehicle speed (m/s)", 0.5, 5.0, 2.0)
-    obstacle_toggle = st.checkbox("Introduce obstacle at mid‑field", True)
+    obstacle_toggle = st.checkbox("Introduce obstacle at mid–field", True)
 
     stripes = int(field_h // stripe_spacing)
     path = []
@@ -593,103 +670,140 @@ with anim:
 
     obstacle_center = (field_w * 0.55, field_h * 0.5)
     obstacle_r = 5.0
-
     if obstacle_toggle:
         detour = []
         for (x, y) in path:
             dx, dy = x - obstacle_center[0], y - obstacle_center[1]
-            d = (dx*dx + dy*dy) ** 0.5
+            d = (dx * dx + dy * dy) ** 0.5
             if d < obstacle_r:
-                off = (dy, -dx); norm = max((off[0]**2 + off[1]**2) ** 0.5, 1e-6)
+                off = (dy, -dx)
+                norm = max((off[0] ** 2 + off[1] ** 2) ** 0.5, 1e-6)
                 scale = (obstacle_r - d) * 0.6
-                x, y = x + (off[0]/norm)*scale, y + (off[1]/norm)*scale
+                x, y = x + (off[0] / norm) * scale, y + (off[1] / norm) * scale
             detour.append((x, y))
         path = np.array(detour)
 
     def interpolate(polyline, step=1.0):
         frames = []
-        for i in range(len(polyline)-1):
-            x1,y1 = polyline[i]; x2,y2 = polyline[i+1]
-            seg = ((x2-x1)**2 + (y2-y1)**2) ** 0.5
-            n = max(int(seg/step), 1)
+        for i in range(len(polyline) - 1):
+            x1, y1 = polyline[i]
+            x2, y2 = polyline[i + 1]
+            seg = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+            n = max(int(seg / step), 1)
             for t in range(n):
-                u = t/n
-                frames.append((x1 + u*(x2-x1), y1 + u*(y2-y1)))
+                u = t / n
+                frames.append((x1 + u * (x2 - x1), y1 + u * (y2 - y1)))
         frames.append(tuple(polyline[-1]))
         return np.array(frames)
 
-    frames = interpolate(path, step=max(speed_mps*0.5, 0.2))
+    frames = interpolate(path, step=max(speed_mps * 0.5, 0.2))
+
     play = st.checkbox("Play", False)
-    frame_idx = st.slider("Timeline", 0, len(frames)-1, 0)
+    frame_idx = st.slider("Timeline", 0, len(frames) - 1, 0)
 
     def draw_frame(idx):
-        fig, ax = plt.subplots(figsize=(7,4))
-        ax.add_patch(plt.Rectangle((0,0), field_w, field_h, fill=False, edgecolor="#777", linewidth=1.5))
-        ax.plot(path[:,0], path[:,1], color="#1f77b4", linewidth=1.5, alpha=0.7, label="Planned path")
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.add_patch(plt.Rectangle((0, 0), field_w, field_h, fill=False, edgecolor="#777", linewidth=1.5))
+        ax.plot(path[:, 0], path[:, 1], color="#1f77b4", linewidth=1.5, alpha=0.7, label="Planned path")
         if obstacle_toggle:
             circ = plt.Circle(obstacle_center, obstacle_r, color="#d62728", alpha=0.2)
-            ax.add_patch(circ); ax.text(obstacle_center[0], obstacle_center[1], "Obstacle", color="#d62728", ha='center', va='center', fontsize=9)
+            ax.add_patch(circ)
+            ax.text(
+                obstacle_center[0],
+                obstacle_center[1],
+                "Obstacle",
+                color="#d62728",
+                ha="center",
+                va="center",
+                fontsize=9,
+            )
         x, y = frames[idx]
-        veh = plt.Circle((x,y), 1.2, color="#2ca02c"); ax.add_patch(veh)
-        if idx < len(frames)-1:
-            x2,y2 = frames[idx+1]
-            ax.arrow(x,y,(x2-x)*0.6,(y2-y)*0.6, head_width=1.0, head_length=1.5, fc="#2ca02c", ec="#2ca02c")
-        ax.set_xlim(-3, field_w+3); ax.set_ylim(-3, field_h+3)
-        ax.set_aspect('equal'); ax.set_xticks([]); ax.set_yticks([])
-        ax.legend(loc='upper right')
+        veh = plt.Circle((x, y), 1.2, color="#2ca02c")
+        ax.add_patch(veh)
+        if idx < len(frames) - 1:
+            x2, y2 = frames[idx + 1]
+            ax.arrow(x, y, (x2 - x) * 0.6, (y2 - y) * 0.6, head_width=1.0, head_length=1.5, fc="#2ca02c", ec="#2ca02c")
+        ax.set_xlim(-3, field_w + 3)
+        ax.set_ylim(-3, field_h + 3)
+        ax.set_aspect("equal")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.legend(loc="upper right")
         st.pyplot(fig)
-        pct_prog = idx/(len(frames)-1)
-        dist_total = np.sum(np.sqrt(np.sum(np.diff(path, axis=0)**2, axis=1)))
-        est_time = dist_total / max(speed_mps, 0.1)
-        st.caption(f"Progress: {pct_prog*100:.0f}% • Distance: {dist_total:.0f} m • ETA @ {speed_mps:.1f} m/s: {est_time/60:.1f} min")
+
+    pct_prog = frame_idx / (len(frames) - 1)
+    dist_total = float(np.sum(np.sqrt(np.sum(np.diff(path, axis=0) ** 2, axis=1)))) if len(path) > 1 else 0.0
+    est_time = dist_total / max(speed_mps, 0.1)
+    st.caption(f"Progress: {pct_prog*100:.0f}% • Distance: {dist_total:.0f} m • ETA @ {speed_mps:.1f} m/s: {est_time/60:.1f} min")
 
     if play:
-        ph = st.empty(); start = frame_idx
+        import time as _t
+        start = frame_idx
         for i in range(start, len(frames)):
             draw_frame(i)
-            import time as _t; _t.sleep(0.05)
-        st.experimental_rerun()
+            _t.sleep(0.05)
+            st.experimental_rerun()
     else:
         draw_frame(frame_idx)
 
 with dealer:
     apply_tab_background("assets/backgrounds/dealer_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Dealer View – Attach Pipeline</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Dealer View – Attach Pipeline
+    """)
     np.random.seed(0)
-    dealers = [f"Dealer {i}" for i in range(1,11)]
-    pipeline = pd.DataFrame({
-        "Dealer": dealers,
-        "Leads": np.random.randint(20,120, size=10),
-        "Installs Scheduled": np.random.randint(5,40, size=10),
-        "Completed Installs": np.random.randint(0,35, size=10),
-    })
+    dealers = [f"Dealer {i}" for i in range(1, 11)]
+    pipeline = pd.DataFrame(
+        {
+            "Dealer": dealers,
+            "Leads": np.random.randint(20, 120, size=10),
+            "Installs Scheduled": np.random.randint(5, 40, size=10),
+            "Completed Installs": np.random.randint(0, 35, size=10),
+        }
+    )
     st.dataframe(pipeline)
-    fig, ax = plt.subplots(figsize=(8,3))
-    ax.bar(pipeline['Dealer'], pipeline['Completed Installs'], label='Completed')
-    ax.bar(pipeline['Dealer'], pipeline['Installs Scheduled'], bottom=pipeline['Completed Installs'], label='Scheduled')
-    ax.set_ylabel('Units'); ax.legend(); plt.xticks(rotation=45, ha='right'); st.pyplot(fig)
+    fig, ax = plt.subplots(figsize=(8, 3))
+    ax.bar(pipeline["Dealer"], pipeline["Completed Installs"], label="Completed")
+    ax.bar(
+        pipeline["Dealer"],
+        pipeline["Installs Scheduled"],
+        bottom=pipeline["Completed Installs"],
+        label="Scheduled",
+    )
+    ax.set_ylabel("Units")
+    ax.legend()
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    st.pyplot(fig)
 
 with console:
     apply_tab_background("assets/backgrounds/console_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Supervision Console</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Supervision Console
+    """)
     rng = np.random.default_rng(42)
-    statuses = ["Idle","Running","Manual Override","Error"]
-    machines = [f"Unit-{i:03d}" for i in range(1,13)]
+    statuses = ["Idle", "Running", "Manual Override", "Error"]
+    machines = [f"Unit-{i:03d}" for i in range(1, 13)]
+
     if st.button("Refresh statuses"):
         st.session_state._fleet = None
+
     if "_fleet" not in st.session_state or st.session_state._fleet is None:
-        st.session_state._fleet = pd.DataFrame({
-            "Machine": machines,
-            "Status": rng.choice(statuses, size=len(machines), p=[0.2,0.6,0.15,0.05]),
-            "Battery%": rng.integers(40,100, size=len(machines)),
-            "Alerts": rng.choice(["","Obstacle","GNSS","Overheat"], size=len(machines), p=[0.7,0.1,0.1,0.1])
-        })
+        st.session_state._fleet = pd.DataFrame(
+            {
+                "Machine": machines,
+                "Status": rng.choice(statuses, size=len(machines), p=[0.2, 0.6, 0.15, 0.05]),
+                "Battery%": rng.integers(40, 100, size=len(machines)),
+                "Alerts": rng.choice(["", "Obstacle", "GNSS", "Overheat"], size=len(machines), p=[0.7, 0.1, 0.1, 0.1]),
+            }
+        )
     st.dataframe(st.session_state._fleet)
-    st.info("Remote actions: Pause • Resume • Return‑to‑Base (storyboard only)")
+    st.info("Remote actions: Pause • Resume • Return-to-Base (storyboard only)")
 
 with export:
     apply_tab_background("assets/backgrounds/roi_bg.jpg")
-    st.markdown('<div class="ws-card ws-accent"><h2>Exports – Executive One‑Pager</h2></div>', unsafe_allow_html=True)
+    st.markdown("""
+    ### Exports – Executive One–Pager
+    """)
     actions = st.session_state.actions
     results = compute_roi(st.session_state.inputs, actions)
 
@@ -705,27 +819,54 @@ with export:
     bullets.append(f"Payback: {pm:.1f} months" if math.isfinite(pm) else "Payback: > horizon")
 
     colP, colD = st.columns(2)
-
     with colP:
         if st.button("Generate PDF"):
-            buf = io.BytesIO(); c = canvas.Canvas(buf, pagesize=LETTER)
-            width, height = LETTER; y = height - 1*inch
-            c.setFont("Helvetica-Bold", 16); c.drawString(1*inch, y, "WorkSmart Hub – Executive Summary"); y -= 0.3*inch
-            c.setFont("Helvetica", 10); c.drawString(1*inch, y, f"Date: {date.today().isoformat()}"); y -= 0.3*inch
+            buf = io.BytesIO()
+            c = canvas.Canvas(buf, pagesize=LETTER)
+            width, height = LETTER
+            y = height - 1 * inch
+
+            c.setFont("Helvetica-Bold", 16)
+            c.drawString(1 * inch, y, "WorkSmart Hub – Executive Summary")
+            y -= 0.3 * inch
+
+            c.setFont("Helvetica", 10)
+            c.drawString(1 * inch, y, f"Date: {date.today().isoformat()}")
+            y -= 0.3 * inch
+
             c.setFont("Helvetica", 11)
             for b in bullets:
-                c.drawString(1*inch, y, f"• {b}"); y -= 0.25*inch
-                if y < 1*inch: c.showPage(); y = height - 1*inch
-            c.showPage(); c.save()
-            st.download_button("Download PDF", data=buf.getvalue(), file_name="WorkSmart_Executive_OnePager.pdf", mime="application/pdf")
+                c.drawString(1 * inch, y, f"• {b}")
+                y -= 0.25 * inch
+                if y < 1 * inch:
+                    c.showPage()
+                    y = height - 1 * inch
+
+            c.showPage()
+            c.save()
+
+            st.download_button(
+                "Download PDF",
+                data=buf.getvalue(),
+                file_name="WorkSmart_Executive_OnePager.pdf",
+                mime="application/pdf",
+            )
 
     with colD:
         if st.button("Generate Word (.docx)"):
-            doc = Document(); doc.add_heading('WorkSmart Hub – Executive Summary', 0)
+            doc = Document()
+            doc.add_heading("WorkSmart Hub – Executive Summary", 0)
             doc.add_paragraph(f"Date: {date.today().isoformat()}")
-            for b in bullets: doc.add_paragraph(b, style='List Bullet')
-            out = io.BytesIO(); doc.save(out)
-            st.download_button("Download DOCX", data=out.getvalue(), file_name="WorkSmart_Executive_OnePager.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            for b in bullets:
+                doc.add_paragraph(b, style="List Bullet")
+            out = io.BytesIO()
+            doc.save(out)
+            st.download_button(
+                "Download DOCX",
+                data=out.getvalue(),
+                file_name="WorkSmart_Executive_OnePager.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
 
-st.markdown("---")
-st.caption(f"© {date.today().year} Kubota – WorkSmart HUD demo. Synthetic data for illustration only.")
+    st.markdown("---")
+    st.caption(f"© {date.today().year} Kubota – WorkSmart HUD demo. Synthetic data for illustration only.")
