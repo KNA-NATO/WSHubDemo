@@ -2,6 +2,7 @@
 import io
 import math
 import base64, mimetypes
+import streamlit.comonents.v1 as components
 from datetime import date
 from pathlib import Path
 import numpy as np
@@ -68,33 +69,39 @@ ASSESS_OVERLAY = {
 if "overlay_offsets" not in st.session_state:
     st.session_state.overlay_offsets = {}
 
+
 def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
     """Render absolutely-positioned live values over the background image."""
-    html_parts = ['<div class="ws-overlay">']
+    # Build compact HTML (no leading spaces/newlines) so nothing gets escaped.
+    parts = ['<div class="ws-overlay">']
     for key, cfg in blocks.items():
         x = cfg.get("x_vw", 0)
         y = cfg.get("y_vh", 0)
         w = cfg.get("w_vw", 10)
         align = cfg.get("align", "left")
         cls = cfg.get("cls", "")
+
         # Per-slot nudge offsets (in pixels)
         dx = st.session_state.overlay_offsets.get(f"{key}_dx", 0)
         dy = st.session_state.overlay_offsets.get(f"{key}_dy", 0)
+
         # Optional alignment guides (dashed border + subtle background)
-        guide_css = (
-            "border:1px dashed rgba(255,255,255,.15); "
-            "background: rgba(0,0,0,.08);"
-            if show_guides
-            else ""
+        guide_css = ("border:1px dashed rgba(255,255,255,.15); background: rgba(0,0,0,.08);"
+                     if show_guides else "")
+
+        # Single-line, compact HTML avoids Markdown "code block" escaping
+        parts.append(
+            f'<div class="ws-overlay-block {cls}" '
+            f'style="left:{x}vw; top:{y}vh; width:{w}vw; '
+            f'transform:translate({dx}px,{dy}px); text-align:{align}; {guide_css}">'
+            f'<div class="value">{values.get(key, "")}</div>'
+            f'</div>'
         )
-        block = f"""
-        <div class="ws-overlay-block {cls}" style="left:{x}vw; top:{y}vh; width:{w}vw; transform:translate({dx}px,{dy}px); text-align:{align}; {guide_css}">
-            <div class="value">{values.get(key, '')}</div>
-        </div>
-        """
-        html_parts.append(block)
-    html_parts.append("</div>")
-    st.markdown("\n".join(html_parts), unsafe_allow_html=True)
+    parts.append("</div>")
+    html = "".join(parts)
+
+    # Render as raw HTML (no Markdown) so tags never get escaped
+    components.html(html, height=0)
 
 # ==============================
 # ROI / P&L utilities
