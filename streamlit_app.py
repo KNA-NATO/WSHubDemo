@@ -33,42 +33,36 @@ def inject_css(path: str = "style.css"):
 
 
 def apply_tab_background(image_path: str):
-    """Embed a background image as data-URI for reliability on Streamlit Cloud."""
+    """Embed a background image as data-URI for reliability on Streamlit Cloud.
+    Uses a clean triple-quoted f-string to avoid unterminated-string issues.
+    """
     p = Path(image_path)
     if not p.exists():
         st.warning(f"Background not found: {image_path}")
         return
     mime = mimetypes.guess_type(p.name)[0] or "image/jpeg"
     data64 = base64.b64encode(p.read_bytes()).decode("ascii")
-    st.markdown(
-        (
-            "<style>
-"
-            ".stApp, .stAppViewContainer, [data-testid='stAppViewContainer'] {
-"
-            f"  background-image: url('data:{mime};base64,{data64}');
-"
-            "  background-size: cover; background-position: center; background-attachment: fixed;
-"
-            "}
-"
-            "</style>"
-        ),
-        unsafe_allow_html=True,
-    )
+    css = f"""
+    <style>
+      .stApp, .stAppViewContainer, [data-testid="stAppViewContainer"] {{
+        background-image: url("data:{mime};base64,{data64}");
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+      }}
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
 
 # ==============================
 # Overlay Engine (align live values to art slots)
 # ==============================
 
-# Designed for the refined Assess background. Coordinates are viewport-based for responsiveness.
 ASSESS_OVERLAY = {
-    # Top row under the ASSESS header
     "fleet":      {"x_vw": 22.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
     "acres":      {"x_vw": 42.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
     "util_rate":  {"x_vw": 61.0, "y_vh": 10.2, "w_vw": 14.0, "align": "center", "cls": "hud-top"},
     "idle_time":  {"x_vw": 80.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
-    # Bottom KPI row (5 pods)
     "maint_cost": {"x_vw": 14.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
     "downtime":   {"x_vw": 32.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
     "safety":     {"x_vw": 50.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
@@ -81,9 +75,6 @@ if "overlay_offsets" not in st.session_state:
 
 
 def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
-    """Render absolutely-positioned live values over the background image.
-    Uses viewport units (vw/vh) plus small pixel offsets stored in session state.
-    """
     html_blocks = []
     for key, cfg in blocks.items():
         x = cfg.get("x_vw", 0)
@@ -94,14 +85,12 @@ def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
         dx = st.session_state.overlay_offsets.get(f"{key}_dx", 0)
         dy = st.session_state.overlay_offsets.get(f"{key}_dy", 0)
         guide_css = "border:1px dashed rgba(255,255,255,.15); background: rgba(0,0,0,.08);" if show_guides else ""
-        block_html = (
+        html_blocks.append(
             f"<div class='ws-overlay-block {cls}' style="
             f"left: calc({x}vw + {dx}px); top: calc({y}vh + {dy}px); width: {w}vw; text-align:{align}; {guide_css}">"
             f"<div class='value kpi-mono'>{values.get(key, '')}</div>"
             "</div>"
         )
-        html_blocks.append(block_html)
-
     wrapper = "<div class='ws-overlay'>" + "
 ".join(html_blocks) + "</div>"
     st.markdown(wrapper, unsafe_allow_html=True)
@@ -115,7 +104,6 @@ def currency(x):
         return f"${x:,.0f}"
     except Exception:
         return str(x)
-
 
 def pct(x):
     try:
@@ -178,10 +166,8 @@ def init_defaults():
         "cac_per_attach": 120.0,
     }
 
-
 def total_machines(inputs):
     return int(sum(inputs["machines"].values()))
-
 
 def estimate_fuel_use(inputs):
     gph = {"Tractors": 3.8, "RTVs": 1.4, "Construction": 4.5}
@@ -190,7 +176,6 @@ def estimate_fuel_use(inputs):
     for k, v in inputs["machines"].items():
         total_gal += gph.get(k, 3.0) * hours * v
     return total_gal
-
 
 def compute_roi(inputs, actions):
     n = total_machines(inputs)
@@ -696,10 +681,8 @@ with export:
         f"Hardware (Year 0): {currency(results['hardware_cost'])}",
         f"Net annual benefit: {currency(results['net_annual_benefit'])}",
         f"NPV ({st.session_state.inputs['time_horizon_years']} yrs @ {pct(st.session_state.inputs['discount_rate'])}): {currency(results['npv'])}",
-        # payback_txt defined in ROI tab earlier; computing again for export clarity
     ]
-    payback_calc = compute_roi(st.session_state.inputs, st.session_state.actions)
-    pm = payback_calc["payback_months"]
+    pm = results["payback_months"]
     bullets.append(f"Payback: {pm:.1f} months" if math.isfinite(pm) else "Payback: > horizon")
 
     colP, colD = st.columns(2)
