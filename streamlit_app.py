@@ -51,9 +51,71 @@ def apply_tab_background(image_path: str):
         unsafe_allow_html=True,
     )
 
+
+def render_stage_with_overlay(bg_path: str, blocks: dict, values: dict, aspect_ratio=(3, 2)):
+    """
+    Render a fixed-aspect stage with bg image + overlay blocks positioned by percentages.
+    blocks: { key: {"x_pct": float, "y_pct": float, "w_pct": float, "align": "center|left|right", "font_px": int} }
+    values: { key: "text" }
+    aspect_ratio: (W, H) of the artwork; current assess image is ~3:2.
+    """
+    p = Path(bg_path)
+    if not p.exists():
+        st.warning(f"Background not found: {bg_path}")
+        return
+
+    w, h = aspect_ratio
+    pad_top_pct = (h / w) * 100.0
+
+    mime = mimetypes.guess_type(p.name)[0] or "image/jpeg"
+    data64 = base64.b64encode(p.read_bytes()).decode("ascii")
+
+    # Build overlay HTML blocks
+    parts = []
+    for key, cfg in blocks.items():
+        x = float(cfg.get("x_pct", 50))
+        y = float(cfg.get("y_pct", 50))
+        w_pct = float(cfg.get("w_pct", 12))
+        align = cfg.get("align", "center")
+        font_px = int(cfg.get("font_px", 22))
+        val = values.get(key, "")
+        parts.append(
+            f'<div class="ws-overlay-block" style="left:{x}%; top:{y}%; width:{w_pct}%; text-align:{align};">'
+            f'<div class="value" style="font-size:{font_px}px;">{val}</div>'
+            f'</div>'
+        )
+    overlay_html = "".join(parts)
+
+    html = f"""
+    <div class="ws-stage">
+      <div class="ws-stage-inner" style="padding-top:{pad_top_pct}%;
+           background-image:url(data:{mime};base64,{data64});">
+        <div class="ws-overlay">{overlay_html}</div>
+      </div>
+    </div>
+    """
+    components.html(html, height=0)
+
+
 # ==============================
 # Overlay Engine (align live values to art slots)
 # ==============================
+
+ASSESS_LAYOUT = {
+    # Top row (left → right)
+    "fleet":      {"x_pct": 22.0, "y_pct": 14.0, "w_pct": 12.0, "align": "center", "font_px": 20},
+    "acres":      {"x_pct": 42.0, "y_pct": 14.0, "w_pct": 12.0, "align": "center", "font_px": 20},
+    "util_rate":  {"x_pct": 61.5, "y_pct": 14.0, "w_pct": 14.0, "align": "center", "font_px": 20},
+    "idle_time":  {"x_pct": 80.0, "y_pct": 14.0, "w_pct": 12.0, "align": "center", "font_px": 20},
+
+    # Bottom tiles (left → right)
+    "maint_cost": {"x_pct": 14.0, "y_pct": 86.0, "w_pct": 16.0, "align": "center", "font_px": 24},
+    "downtime":   {"x_pct": 32.0, "y_pct": 86.0, "w_pct": 16.0, "align": "center", "font_px": 24},
+    "safety":     {"x_pct": 50.0, "y_pct": 86.0, "w_pct": 16.0, "align": "center", "font_px": 24},
+    "rework":     {"x_pct": 68.0, "y_pct": 86.0, "w_pct": 16.0, "align": "center", "font_px": 24},
+    "fuel":       {"x_pct": 86.0, "y_pct": 86.0, "w_pct": 12.0, "align": "center", "font_px": 24},
+}
+
 ASSESS_OVERLAY = {
     "fleet": {"x_vw": 22.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
     "acres": {"x_vw": 42.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
@@ -400,36 +462,14 @@ with oview:
     with col3:
         st.metric("Downtime (hrs/mo)", f"{st.session_state.inputs['baseline_downtime_hours_month']:.0f}")
 
+
 with assess:
-    apply_tab_background("assets/backgrounds/assess_bg.jpg")
-    st.markdown("""
-    ### Assess – Baseline the Operation
-    """)
+    # (No need to call apply_tab_background here anymore)
+    st.markdown("### Assess – Baseline the Operation")
 
-    # Alignment tools
-    with st.expander("Overlay alignment tools (Assess)"):
-        show_guides = st.checkbox("Show overlay guides", value=False)
-        cols = st.columns(5)
-        keys = [
-            "fleet",
-            "acres",
-            "util_rate",
-            "idle_time",
-            "maint_cost",
-            "downtime",
-            "safety",
-            "rework",
-            "fuel",
-        ]
-        for i, key in enumerate(keys):
-            with cols[i % 5]:
-                st.session_state.overlay_offsets[f"{key}_dx"] = st.number_input(
-                    f"{key} dx", -50, 50, int(st.session_state.overlay_offsets.get(f"{key}_dx", 0))
-                )
-                st.session_state.overlay_offsets[f"{key}_dy"] = st.number_input(
-                    f"{key} dy", -50, 50, int(st.session_state.overlay_offsets.get(f"{key}_dy", 0))
-                )
+    # --- (Optional) Alignment tools you already have can remain below ---
 
+    # Build the live values for the overlay from current inputs
     i = st.session_state.inputs
     util_rate = min(i["util_hours_per_machine"] / 2000.0, 1.0)
     values = {
@@ -443,9 +483,16 @@ with assess:
         "rework": f"{i['rework_pct']*100:.0f}%",
         "fuel": f"${i['fuel_price']:.2f}",
     }
-    render_overlay(ASSESS_OVERLAY, values, show_guides=show_guides)
 
-    # Interactive inputs remain below
+    # >>> THIS is the one call that renders the clean background + overlay <<<
+    render_stage_with_overlay(
+        bg_path="assets/backgrounds/assess_bg.jpg",  # you kept this name; perfect
+        blocks=ASSESS_LAYOUT,
+        values=values,
+        aspect_ratio=(3, 2),  # current Assess artwork is ~3:2; update if you export differently
+    )
+
+    # --- Your interactive inputs and sliders can remain below the stage ---
     st.markdown("---")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -468,12 +515,15 @@ with assess:
     c4, c5, c6 = st.columns(3)
     with c4:
         i["baseline_downtime_hours_month"] = st.number_input(
-            "Unplanned downtime (hrs/mo)", 0.0, 1000.0, float(i["baseline_downtime_hours_month"]))
+            "Unplanned downtime (hrs/mo)", 0.0, 1000.0, float(i["baseline_downtime_hours_month"])
+        )
         i["baseline_maint_cost_year"] = st.number_input(
-            "Maintenance cost ($/yr)", 0.0, 1e7, float(i["baseline_maint_cost_year"]))
+            "Maintenance cost ($/yr)", 0.0, 1e7, float(i["baseline_maint_cost_year"])
+        )
     with c5:
         i["safety_incidents_year"] = st.number_input(
-            "Safety incidents (per yr)", 0.0, 100.0, float(i["safety_incidents_year"]))
+            "Safety incidents (per yr)", 0.0, 100.0, float(i["safety_incidents_year"])
+        )
         i["rework_pct"] = st.slider("Rework (% of labor)", 0.0, 0.5, float(i["rework_pct"]))
     with c6:
         i["yield_uplift_potential"] = st.slider("Potential yield uplift", 0.0, 0.2, float(i["yield_uplift_potential"]))
@@ -876,4 +926,5 @@ with export:
             )
 
     st.markdown("---")
+
     st.caption(f"© {date.today().year} Kubota – WorkSmart HUD demo. Synthetic data for illustration only.")
