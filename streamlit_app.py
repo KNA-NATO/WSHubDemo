@@ -16,20 +16,13 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
 from docx import Document
 
-# -------------------------------------------------------------
-# WorkSmart Hub – Executive Demo (Assist → Autonomy)
-# HUD x Industrial visual identity with per-tab backgrounds
-# + Overlay engine to align LIVE values to designed slots in background
-# -------------------------------------------------------------
-
 st.set_page_config(page_title="WorkSmart Hub – Executive Demo", page_icon="🚜", layout="wide")
 
-# ------------------------------
-# Theming helpers (CSS & backgrounds)
-# ------------------------------
+# ==============================
+# CSS & Background Helpers
+# ==============================
 
 def inject_css(path: str = "style.css"):
-    """Inject app-wide CSS and scanlines overlay."""
     p = Path(path)
     if p.exists():
         css = p.read_text(encoding="utf-8")
@@ -40,10 +33,7 @@ def inject_css(path: str = "style.css"):
 
 
 def apply_tab_background(image_path: str):
-    """Apply a per-tab background image by embedding it as a CSS data-URI.
-    This avoids any path/URL issues on Streamlit Cloud and targets both legacy
-    and current container selectors.
-    """
+    """Embed a background image as data-URI for reliability on Streamlit Cloud."""
     p = Path(image_path)
     if not p.exists():
         st.warning(f"Background not found: {image_path}")
@@ -51,30 +41,34 @@ def apply_tab_background(image_path: str):
     mime = mimetypes.guess_type(p.name)[0] or "image/jpeg"
     data64 = base64.b64encode(p.read_bytes()).decode("ascii")
     st.markdown(
-        f"""
-        <style>
-          .stApp, .stAppViewContainer, [data-testid="stAppViewContainer"] {{
-              background-image: url("data:{mime};base64,{data64}");
-              background-size: cover; background-position: center; background-attachment: fixed;
-          }}
-        </style>
-        """,
+        (
+            "<style>
+"
+            ".stApp, .stAppViewContainer, [data-testid='stAppViewContainer'] {
+"
+            f"  background-image: url('data:{mime};base64,{data64}');
+"
+            "  background-size: cover; background-position: center; background-attachment: fixed;
+"
+            "}
+"
+            "</style>"
+        ),
         unsafe_allow_html=True,
     )
 
-# ------------------------------
-# Overlay engine for placing live values on background
-# ------------------------------
+# ==============================
+# Overlay Engine (align live values to art slots)
+# ==============================
 
-# Default overlay positions for the ASSESS background.
-# Coordinates use viewport units so they scale with the window (designed for 1920x1080 but responsive).
+# Designed for the refined Assess background. Coordinates are viewport-based for responsiveness.
 ASSESS_OVERLAY = {
-    # top metric row (approximate positions under the "ASSESS" header)
+    # Top row under the ASSESS header
     "fleet":      {"x_vw": 22.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
     "acres":      {"x_vw": 42.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
     "util_rate":  {"x_vw": 61.0, "y_vh": 10.2, "w_vw": 14.0, "align": "center", "cls": "hud-top"},
     "idle_time":  {"x_vw": 80.0, "y_vh": 10.2, "w_vw": 12.0, "align": "center", "cls": "hud-top"},
-    # bottom card row (five pods)
+    # Bottom KPI row (5 pods)
     "maint_cost": {"x_vw": 14.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
     "downtime":   {"x_vw": 32.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
     "safety":     {"x_vw": 50.0, "y_vh": 84.0, "w_vw": 16.0, "align": "center", "cls": "hud-bottom"},
@@ -82,16 +76,13 @@ ASSESS_OVERLAY = {
     "fuel":       {"x_vw": 86.0, "y_vh": 84.0, "w_vw": 10.0, "align": "center", "cls": "hud-bottom"},
 }
 
-# Allow fine adjustments (px) without modifying code
 if "overlay_offsets" not in st.session_state:
     st.session_state.overlay_offsets = {}
 
 
 def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
-    """Render absolutely positioned overlay blocks on top of the app.
-    blocks: mapping id -> {x_vw,y_vh,w_vw,align,cls}
-    values: mapping id -> string to display
-    show_guides: draws subtle rectangles for alignment
+    """Render absolutely-positioned live values over the background image.
+    Uses viewport units (vw/vh) plus small pixel offsets stored in session state.
     """
     html_blocks = []
     for key, cfg in blocks.items():
@@ -100,30 +91,24 @@ def render_overlay(blocks: dict, values: dict, show_guides: bool = False):
         w = cfg.get("w_vw", 10)
         align = cfg.get("align", "left")
         cls = cfg.get("cls", "")
-        # session-based offset tweaks (px)
         dx = st.session_state.overlay_offsets.get(f"{key}_dx", 0)
         dy = st.session_state.overlay_offsets.get(f"{key}_dy", 0)
+        guide_css = "border:1px dashed rgba(255,255,255,.15); background: rgba(0,0,0,.08);" if show_guides else ""
+        block_html = (
+            f"<div class='ws-overlay-block {cls}' style="
+            f"left: calc({x}vw + {dx}px); top: calc({y}vh + {dy}px); width: {w}vw; text-align:{align}; {guide_css}">"
+            f"<div class='value kpi-mono'>{values.get(key, '')}</div>"
+            "</div>"
+        )
+        html_blocks.append(block_html)
 
-        guide = "border:1px dashed rgba(255,255,255,.15); background: rgba(0,0,0,.08);" if show_guides else ""
-        html_blocks.append(f"""
-        <div class="ws-overlay-block {cls}" style="left: calc({x}vw + {dx}px); top: calc({y}vh + {dy}px); width: {w}vw; text-align:{align}; {guide}">
-            <div class="value kpi-mono">{values.get(key, '')}</div>
-        </div>
-        """)
+    wrapper = "<div class='ws-overlay'>" + "
+".join(html_blocks) + "</div>"
+    st.markdown(wrapper, unsafe_allow_html=True)
 
-    st.markdown(
-        """
-        <div class="ws-overlay">
-            %s
-        </div>
-        """ % ("
-".join(html_blocks)),
-        unsafe_allow_html=True,
-    )
-
-# ------------------------------
-# Utilities & model
-# ------------------------------
+# ==============================
+# ROI / P&L utilities
+# ==============================
 
 def currency(x):
     try:
@@ -141,14 +126,12 @@ def pct(x):
 
 def init_defaults():
     if "inputs" in st.session_state:
-        # ensure new keys exist after updates
         missing_defaults = {
             "autosteer_overlap_reduction_pct": 0.12,
             "autosteer_yield_consistency_pct": 0.005,
             "autonomy_productivity_gain_pct": 0.25,
             "autonomy_supervision_gain_pct": 0.20,
             "autonomy_safety_gain_pct": 0.10,
-            # Enterprise scale
             "base_deployed_fleet": 10000,
             "attach_rate": 0.35,
             "attach_growth_yoy": 0.20,
@@ -159,7 +142,6 @@ def init_defaults():
         return
 
     st.session_state.inputs = {
-        # Fleet profile
         "acres": 1500,
         "crops": "Row crops",
         "machines": {"Tractors": 6, "RTVs": 4, "Construction": 2},
@@ -172,28 +154,23 @@ def init_defaults():
         "safety_incidents_year": 2,
         "rework_pct": 0.06,
         "yield_uplift_potential": 0.02,
-        # Adoption / pricing
         "telemetry_attach_rate": 0.75,
         "worksmart_price_per_machine_month": 35.0,
         "hardware_kit_price": 450.0,
         "hardware_gross_margin": 0.35,
-        # Base improvements
         "idle_reduction_pct": 0.35,
         "downtime_reduction_pct": 0.25,
         "maint_cost_reduction_pct": 0.12,
         "safety_reduction_pct": 0.30,
         "rework_reduction_pct": 0.30,
         "labor_productivity_gain_pct": 0.05,
-        # Phase effects
         "autosteer_overlap_reduction_pct": 0.12,
         "autosteer_yield_consistency_pct": 0.005,
         "autonomy_productivity_gain_pct": 0.25,
         "autonomy_supervision_gain_pct": 0.20,
         "autonomy_safety_gain_pct": 0.10,
-        # Finance
         "discount_rate": 0.12,
         "time_horizon_years": 3,
-        # Enterprise
         "base_deployed_fleet": 10000,
         "attach_rate": 0.35,
         "attach_growth_yoy": 0.20,
@@ -225,7 +202,6 @@ def compute_roi(inputs, actions):
     fuel_price = inputs["fuel_price"]
     labor_rate = inputs["labor_rate"]
 
-    # Base actions
     idle_reduction = inputs["idle_reduction_pct"] if actions.get("reduce_idling") else 0.0
     downtime_reduction = inputs["downtime_reduction_pct"] if actions.get("predictive_maint") else 0.0
     maint_cost_reduction = inputs["maint_cost_reduction_pct"] if actions.get("predictive_maint") else 0.0
@@ -237,36 +213,28 @@ def compute_roi(inputs, actions):
     autosteer = actions.get("autosteer", False)
     autonomy = actions.get("autonomy", False)
 
-    # 1) Fuel savings via idling reduction
     idle_share = inputs["baseline_idle_pct"]
     fuel_idle = baseline_fuel_gal * idle_share
     fuel_saved_gal = fuel_idle * idle_reduction
     fuel_savings = fuel_saved_gal * fuel_price
 
-    # 2) Downtime reduction → productive hour value proxy
     downtime_hours_year = inputs["baseline_downtime_hours_month"] * 12
     downtime_hours_saved = downtime_hours_year * downtime_reduction
     downtime_value = downtime_hours_saved * labor_rate
 
-    # 3) Maintenance cost reduction
     maint_savings = inputs["baseline_maint_cost_year"] * maint_cost_reduction
 
-    # 4) Safety incidents reduced
     avg_cost_per_incident = 15000
     safety_saved = inputs["safety_incidents_year"] * safety_reduction * avg_cost_per_incident
 
-    # 5) Rework reduction
     rework_hours = total_hours * inputs["rework_pct"]
     rework_saved = rework_hours * rework_reduction * labor_rate
 
-    # 6) Labor productivity
     productivity_value = total_hours * labor_rate * labor_productivity
 
-    # 7) Yield uplift
     revenue_per_acre = 350
     yield_uplift_value = inputs["acres"] * revenue_per_acre * yield_uplift
 
-    # 8) AutoSteer
     autosteer_fuel = 0.0
     autosteer_yield = 0.0
     if autosteer:
@@ -274,7 +242,6 @@ def compute_roi(inputs, actions):
         autosteer_fuel = non_idle_fuel_gal * inputs["autosteer_overlap_reduction_pct"] * fuel_price
         autosteer_yield = inputs["acres"] * revenue_per_acre * inputs["autosteer_yield_consistency_pct"]
 
-    # 9) Autonomy
     autonomy_prod = 0.0
     autonomy_supervision = 0.0
     autonomy_safety = 0.0
@@ -293,7 +260,6 @@ def compute_roi(inputs, actions):
     hardware_cost = attached_machines * inputs["hardware_kit_price"]
     net_annual_benefit = gross_annual_benefit - subscription_cost
 
-    # NPV over horizon (hardware upfront at t=0)
     r = inputs["discount_rate"]
     years = inputs["time_horizon_years"]
     cash_flows = [-hardware_cost] + [net_annual_benefit for _ in range(years)]
@@ -388,10 +354,10 @@ def enterprise_pnl(inputs):
 
     return pd.DataFrame(data)
 
+# ==============================
+# Init & Tabs
+# ==============================
 
-# ------------------------------
-# Initialize state
-# ------------------------------
 init_defaults()
 if "actions" not in st.session_state:
     st.session_state.actions = {
@@ -404,42 +370,36 @@ if "actions" not in st.session_state:
         "autonomy": False,
     }
 
-# Inject theme CSS
 inject_css("style.css")
-
-# ------------------------------
-# UI Tabs
-# ------------------------------
 
 oview, assess, analyze, act, roi, kubota, roadmap, hardware, anim, dealer, console, export = st.tabs([
     "Overview", "Assess", "Analyze", "Act", "ROI & Business Case", "Kubota Impact", "Roadmap", "Hardware Vision", "Autonomy Animation", "Dealer View", "Supervision Console", "Export"
 ])
 
 with oview:
-    apply_tab_background("assets/backgrounds/assess_bg.jpg")  # Placeholder until specific overview image
+    apply_tab_background("assets/backgrounds/assess_bg.jpg")
     st.markdown('<div class="ws-card ws-accent"><h2>Overview</h2><div class="ws-line" style="margin-top:8px"></div></div>', unsafe_allow_html=True)
     st.caption("A retro‑future Kubota HUD showcasing Assess → Analyze → Act, ROI, and enterprise scale.")
     col1, col2, col3 = st.columns(3)
-    with col1: kpi_block("Connected fleet", "24", "demo value")
-    with col2: kpi_block("Avg idle share", pct(st.session_state.inputs["baseline_idle_pct"]))
-    with col3: kpi_block("Downtime (hrs/mo)", f"{st.session_state.inputs['baseline_downtime_hours_month']:.0f}")
+    with col1: st.metric("Connected fleet (demo)", 24)
+    with col2: st.metric("Avg idle share", pct(st.session_state.inputs["baseline_idle_pct"]))
+    with col3: st.metric("Downtime (hrs/mo)", f"{st.session_state.inputs['baseline_downtime_hours_month']:.0f}")
 
 with assess:
     apply_tab_background("assets/backgrounds/assess_bg.jpg")
     st.markdown('<div class="ws-card ws-accent"><h2>Assess – Baseline the Operation</h2></div>', unsafe_allow_html=True)
 
-    # Toggle: show overlay guides and tweak offsets (for live alignment)
+    # Alignment tools
     with st.expander("Overlay alignment tools (Assess)"):
         show_guides = st.checkbox("Show overlay guides", value=False)
         cols = st.columns(5)
-        for i, key in enumerate(["fleet","acres","util_rate","idle_time","maint_cost","downtime","safety","rework","fuel"]):
+        keys = ["fleet","acres","util_rate","idle_time","maint_cost","downtime","safety","rework","fuel"]
+        for i, key in enumerate(keys):
             with cols[i % 5]:
                 st.session_state.overlay_offsets[f"{key}_dx"] = st.number_input(f"{key} dx", -50, 50, int(st.session_state.overlay_offsets.get(f"{key}_dx", 0)))
                 st.session_state.overlay_offsets[f"{key}_dy"] = st.number_input(f"{key} dy", -50, 50, int(st.session_state.overlay_offsets.get(f"{key}_dy", 0)))
 
-    # Build live values for overlay slots
     i = st.session_state.inputs
-    # Simple utilization proxy (assumes 2000 hrs/year full util)
     util_rate = min(i["util_hours_per_machine"] / 2000.0, 1.0)
     values = {
         "fleet": f"{total_machines(i)}",
@@ -452,10 +412,9 @@ with assess:
         "rework": f"{i['rework_pct']*100:.0f}%",
         "fuel": f"${i['fuel_price']:.2f}",
     }
-    # Render overlay LAST so it sits above widgets but below interactions (pointer-events:none)
     render_overlay(ASSESS_OVERLAY, values, show_guides=show_guides)
 
-    # Keep original input controls below for interactivity
+    # Interactive inputs remain below
     st.markdown("---")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -611,7 +570,6 @@ with hardware:
 with anim:
     apply_tab_background("assets/backgrounds/anim_bg.jpg")
     st.markdown('<div class="ws-card ws-accent"><h2>Autonomy Animation – Supervised Route</h2></div>', unsafe_allow_html=True)
-    import time
     field_w, field_h = 100.0, 60.0
     stripe_spacing = 6.0
     speed_mps = st.slider("Vehicle speed (m/s)", 0.5, 5.0, 2.0)
@@ -738,9 +696,11 @@ with export:
         f"Hardware (Year 0): {currency(results['hardware_cost'])}",
         f"Net annual benefit: {currency(results['net_annual_benefit'])}",
         f"NPV ({st.session_state.inputs['time_horizon_years']} yrs @ {pct(st.session_state.inputs['discount_rate'])}): {currency(results['npv'])}",
-        f"Payback: {payback_txt}",
-        "Selected actions: " + ", ".join([k for k,v in st.session_state.actions.items() if v]),
+        # payback_txt defined in ROI tab earlier; computing again for export clarity
     ]
+    payback_calc = compute_roi(st.session_state.inputs, st.session_state.actions)
+    pm = payback_calc["payback_months"]
+    bullets.append(f"Payback: {pm:.1f} months" if math.isfinite(pm) else "Payback: > horizon")
 
     colP, colD = st.columns(2)
 
